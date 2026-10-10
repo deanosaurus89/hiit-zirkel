@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>HIIT Zirkel</title>
+  <meta name="description" content="Konfigurierbares HIIT-Zirkeltraining im Stil des 7-Minuten-Workouts.">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HIIT Zirkel">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ════════ SETUP ════════ -->
+    <section id="screen-setup" class="screen active" aria-label="Training einstellen">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></div>
+          <div>
+            <h1>HIIT Zirkel</h1>
+            <p class="sub" id="history-line">Kurz. Intensiv. Wirksam.</p>
+          </div>
+        </div>
+        <button class="icon-btn" id="btn-library" aria-label="Übungsbibliothek">
+          <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5zM4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>
+        </button>
+      </header>
+
+      <main class="scroll">
+        <div class="hero card">
+          <div class="hero-label">Gesamtdauer</div>
+          <div class="hero-time" id="total-time">0:00</div>
+          <div class="hero-meta" id="total-meta"></div>
+          <div class="presets" role="group" aria-label="Vorlagen">
+            <button class="chip" data-preset="classic">7-Min-Klassiker</button>
+            <button class="chip" data-preset="tabata">Tabata-Stil 8×20 s</button>
+            <button class="chip" data-preset="long">14 × 30 s × 2</button>
+          </div>
+        </div>
+
+        <h2 class="section-title">Training</h2>
+        <div class="card list-card" id="steppers"></div>
+
+        <h2 class="section-title">Ausrüstung</h2>
+        <p class="section-hint">Wähle, was du zur Hand hast – die Übungen werden passend zusammengestellt.</p>
+        <div class="equip-grid" id="equip"></div>
+
+        <div class="section-row">
+          <h2 class="section-title">Deine Übungen</h2>
+          <button class="text-btn" id="btn-shuffle">
+            <svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+            Neu mischen
+          </button>
+        </div>
+        <p class="section-hint">Tippe auf eine Übung für Anleitung &amp; Alternativen. ⇄ tauscht sie zufällig aus.</p>
+        <ol class="plan" id="plan"></ol>
+
+        <h2 class="section-title">Optionen</h2>
+        <div class="card list-card" id="options"></div>
+        <p class="footnote">Tipp: In Safari über <b>Teilen → Zum Home-Bildschirm</b> wird HIIT Zirkel zur App im Vollbild. Bei Beschwerden oder Schmerzen das Training abbrechen.</p>
+      </main>
+
+      <div class="cta-bar">
+        <button class="cta" id="btn-start">
+          <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></svg>
+          <span>Training starten</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ════════ PLAYER ════════ -->
+    <section id="screen-player" class="screen" aria-label="Training läuft" data-phase="prep">
+      <div class="glow" aria-hidden="true"></div>
+      <header class="p-top">
+        <button class="icon-btn" id="btn-close" aria-label="Training beenden">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+        <div class="p-counter">
+          <span id="p-round">Runde 1/2</span>
+          <span class="dot">•</span>
+          <span id="p-index">Übung 1/12</span>
+        </div>
+        <button class="icon-btn" id="btn-voice" aria-label="Sprachansage umschalten"></button>
+      </header>
+      <div class="p-progress"><div id="p-progress-bar"></div></div>
+
+      <div class="p-body">
+        <div class="p-phase" id="p-phase">Mach dich bereit</div>
+        <div class="p-stage">
+          <svg id="p-figure" class="fig big" aria-hidden="true"></svg>
+          <div class="p-sides hidden" id="p-sides">Seite wechseln!</div>
+        </div>
+        <div class="p-name-wrap">
+          <div class="p-next-label" id="p-next-label">Als Nächstes</div>
+          <h2 class="p-name" id="p-name">Hampelmann</h2>
+          <div class="tags" id="p-tags"></div>
+        </div>
+        <div class="p-timer-row">
+          <div class="ring">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="ring-bg" cx="60" cy="60" r="52"/>
+              <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"/>
+            </svg>
+            <div class="ring-num" id="p-time">30</div>
+          </div>
+          <div class="p-info" id="p-info">
+            <p id="p-desc"></p>
+            <p class="tip" id="p-tip"></p>
+          </div>
+        </div>
+      </div>
+
+      <footer class="p-controls">
+        <button class="ctrl" id="btn-prev" aria-label="Zurück"><svg viewBox="0 0 24 24"><path d="M19 5v14L9 12zM5 5v14"/></svg></button>
+        <button class="ctrl main" id="btn-pause" aria-label="Pause"></button>
+        <button class="ctrl" id="btn-next" aria-label="Überspringen"><svg viewBox="0 0 24 24"><path d="M5 5v14l10-7zM19 5v14"/></svg></button>
+      </footer>
+      <div class="paused-overlay hidden" id="paused-overlay">
+        <div>Pausiert</div>
+        <button class="cta small" id="btn-resume"><svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></svg><span>Weiter</span></button>
+      </div>
+    </section>
+
+    <!-- ════════ SUMMARY ════════ -->
+    <section id="screen-summary" class="screen" aria-label="Zusammenfassung">
+      <main class="scroll center">
+        <div class="trophy" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+        </div>
+        <h1 class="done-title">Geschafft!</h1>
+        <p class="sub" id="sum-sub">Starke Leistung.</p>
+        <div class="stat-grid" id="sum-stats"></div>
+        <h2 class="section-title">Absolvierte Übungen</h2>
+        <ol class="plan compact" id="sum-list"></ol>
+      </main>
+      <div class="cta-bar two">
+        <button class="ghost" id="btn-again">Nochmal</button>
+        <button class="cta" id="btn-done"><span>Fertig</span></button>
+      </div>
+    </section>
+
+    <!-- ════════ SHEETS ════════ -->
+    <div class="sheet-backdrop" id="backdrop"></div>
+    <div class="sheet" id="sheet-detail" role="dialog" aria-modal="true" aria-labelledby="d-name">
+      <div class="grabber"></div>
+      <button class="icon-btn sheet-close" data-close aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="sheet-scroll">
+        <div class="d-stage"><svg id="d-figure" class="fig big"></svg></div>
+        <h2 id="d-name"></h2>
+        <div class="d-en" id="d-en"></div>
+        <div class="tags" id="d-tags"></div>
+        <p class="d-desc" id="d-desc"></p>
+        <div class="tipbox"><b>Technik-Tipp</b><span id="d-tip"></span></div>
+        <div class="d-muscles"><b>Muskeln:</b> <span id="d-muscles"></span></div>
+        <div id="d-swap-wrap">
+          <h3 class="section-title">Austauschen gegen …</h3>
+          <ol class="plan compact" id="d-swap"></ol>
+        </div>
+      </div>
+    </div>
+    <div class="sheet tall" id="sheet-library" role="dialog" aria-modal="true" aria-label="Übungsbibliothek">
+      <div class="grabber"></div>
+      <button class="icon-btn sheet-close" data-close aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="sheet-head">
+        <h2>Übungsbibliothek</h2>
+        <p class="sub" id="lib-count"></p>
+        <div class="filters" id="lib-filters"></div>
+      </div>
+      <div class="sheet-scroll"><ol class="plan compact" id="lib-list"></ol></div>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="figure.js"></script>
+  <script src="exercises.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
