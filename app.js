@@ -164,7 +164,7 @@
     row.innerHTML = `<div class="row-label">${label}<small>${hint}</small></div><button class="switch" role="switch" aria-label="${label}"></button>`;
     const sw = row.querySelector('.switch');
     const show = () => sw.setAttribute('aria-checked', String(!!S[key]));
-    sw.addEventListener('click', () => { S[key] = !S[key]; show(); persist(); haptic(); if (key === 'voice' && S.voice) { unlockAudio(); speak('Sprachansage an'); } });
+    sw.addEventListener('click', () => { S[key] = !S[key]; show(); persist(); haptic(); unlockAudio(); if (key === 'voice' && S.voice) speak('Sprachansage an'); if (key === 'sound' && S.sound) cue('tick'); });
     show(); container.appendChild(row);
   }
   let stepRows = [];
@@ -173,8 +173,12 @@
     stepRows = STEPPERS.map((d) => stepperRow(d, st));
     const op = $('#options'); op.innerHTML = '';
     stepperRow({ key: 'prep', label: 'Vorbereitung', hint: 'Countdown vor dem Start', min: 0, max: 30, step: 5, unit: 's' }, op);
-    switchRow('Signaltöne', 'Piepen in den letzten 3 Sekunden', 'sound', op);
+    switchRow('Signaltöne', 'Start, Halbzeit, Countdown & Ende', 'sound', op);
     switchRow('Sprachansage', 'Übungen auf Deutsch ansagen', 'voice', op);
+    const tr = document.createElement('div'); tr.className = 'row';
+    tr.innerHTML = '<div class="row-label">Ton testen<small>Start · Halbzeit · 3-2-1 · Ende</small></div><button class="chip" id="btn-testsound">▶︎ Abspielen</button>';
+    tr.querySelector('button').addEventListener('click', () => { haptic(); testSound(); });
+    op.appendChild(tr);
     renderEquip(); renderPlan(); renderSummaryLine(); renderHistoryLine();
   }
   function renderEquip() {
@@ -310,48 +314,142 @@
   }
 
   // ───────────── Audio & Sprache ─────────────
-  let actx = null;
-  function unlockAudio() {
-    try {
-      if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); }
-      if (actx && actx.state === 'suspended') actx.resume();
-      if (actx) { const b = actx.createBuffer(1, 1, 22050); const s = actx.createBufferSource(); s.buffer = b; s.connect(actx.destination); s.start(0); }
-    } catch (e) { /* */ }
-    try { if ('speechSynthesis' in window && S.voice) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } } catch (e) { /* */ }
+  // iOS: Web Audio ist vom Stumm-Schalter betroffen und muss in einer Nutzergeste entsperrt werden.
+  // Strategie: Töne werden einmal als PCM vorberechnet. Wiedergabe über Web Audio (mit audioSession
+  // 'playback' auf iOS 17+) – auf älterem iOS bzw. wenn der Kontext nicht läuft über HTMLAudio-Elemente
+  // (WAV-Blobs), die als Medienwiedergabe auch bei Stumm-Schalter hörbar sind.
+  const SR = 44100;
+  const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const HAS_SESSION = 'audioSession' in navigator;
+  // Ton-Design: [Frequenz Start, Frequenz Ende, Dauer, Startzeit, Lautstärke, Wellenform]
+  const CUE_DEF = {
+    start: [[660, 660, 0.13, 0, 0.55, 'sq'], [990, 990, 0.26, 0.15, 0.55, 'sq']],            // steigender Doppelton
+    half: [[880, 880, 0.22, 0, 0.5, 'tri']],                                                // einzelner mittlerer Ton
+    tick: [[1250, 1250, 0.07, 0, 0.6, 'tri']],                                              // kurzer Tick
+    end: [[700, 330, 0.6, 0, 0.6, 'sq']],                                                   // langer fallender Ton
+    done: [[523, 523, 0.18, 0, 0.5, 'tri'], [659, 659, 0.18, 0.15, 0.5, 'tri'], [784, 784, 0.18, 0.3, 0.5, 'tri'], [1047, 1047, 0.45, 0.45, 0.5, 'tri']],
+    silent: [[440, 440, 0.05, 0, 0, 'sine']]
+  };
+  function synth(def) {
+    const len = Math.ceil(SR * (Math.max(...def.map((d) => d[3] + d[2])) + 0.03));
+    const out = new Float32Array(len);
+    def.forEach(([f0, f1, dur, at, vol, w]) => {
+      const n0 = Math.floor(at * SR), n = Math.floor(dur * SR);
+      let ph = 0;
+      for (let i = 0; i < n && n0 + i < len; i++) {
+        const k = i / n, f = f0 + (f1 - f0) * k;
+        ph += 2 * Math.PI * f / SR;
+        let v = Math.sin(ph);
+        if (w === 'sq') v = Math.tanh(4 * v) * 0.75; else if (w === 'tri') v = (2 / Math.PI) * Math.asin(Math.sin(ph));
+        const env = Math.min(1, i / (0.006 * SR)) * Math.min(1, (n - i) / (0.04 * SR));
+        out[n0 + i] += v * vol * env;
+      }
+    });
+    return out;
   }
-  function tone(freq, dur, when = 0, vol = 0.32, type = 'sine') {
-    if (!S.sound || !actx) return;
+  function wavURL(pcm) {
+    const buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) dv.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, SR, true);
+    dv.setUint32(28, SR * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, pcm.length * 2, true);
+    for (let i = 0; i < pcm.length; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 32767, true);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+  const PCM = {};
+  Object.keys(CUE_DEF).forEach((k) => { PCM[k] = synth(CUE_DEF[k]); });
+  const A = { ctx: null, bufs: {}, els: {}, unlocked: false, mode: (IS_IOS && !HAS_SESSION) ? 'html' : 'webaudio', log: [] };
+  function setSession() { try { if (HAS_SESSION) navigator.audioSession.type = 'playback'; } catch (e) { /* */ } }
+  function ensureEls() {
+    if (A.els.start) return;
+    Object.keys(PCM).forEach((k) => {
+      const url = wavURL(PCM[k]);
+      // je 2 Elemente pro Ton, damit schnelle Wiederholungen (Ticks) sich nicht abschneiden
+      A.els[k] = [0, 1].map(() => { const a = new Audio(url); a.preload = 'auto'; a.setAttribute('playsinline', ''); return a; });
+      A.els[k].i = 0;
+    });
+  }
+  // MUSS synchron aus einem Tap/Klick aufgerufen werden
+  function unlockAudio() {
+    setSession();
     try {
-      if (actx.state === 'suspended') actx.resume();
-      const t = actx.currentTime + when;
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = type; o.frequency.setValueAtTime(freq, t);
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+      if (!A.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) A.ctx = new AC(); }
+      if (A.ctx) {
+        if (A.ctx.state !== 'running') A.ctx.resume().catch(() => {});
+        const b = A.ctx.createBuffer(1, 1, 22050), src = A.ctx.createBufferSource();
+        src.buffer = b; src.connect(A.ctx.destination); src.start(0);
+        if (!A.bufs.start) Object.keys(PCM).forEach((k) => { const ab = A.ctx.createBuffer(1, PCM[k].length, SR); ab.getChannelData(0).set(PCM[k]); A.bufs[k] = ab; });
+      }
     } catch (e) { /* */ }
+    try {
+      ensureEls();
+      if (!A.unlocked) {
+        Object.keys(A.els).forEach((k) => A.els[k].forEach((a) => {
+          a.muted = true; const pr = a.play(); if (pr && pr.then) pr.then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => { a.muted = false; });
+          else { a.pause(); a.muted = false; }
+        }));
+      }
+    } catch (e) { /* */ }
+    A.unlocked = true;
+    unlockSpeech();
+  }
+  function resumeAudio() {
+    setSession();
+    try { if (A.ctx && A.ctx.state !== 'running' && A.ctx.state !== 'closed') A.ctx.resume().catch(() => {}); } catch (e) { /* */ }
+  }
+  function playHTML(name) {
+    ensureEls();
+    const pool = A.els[name]; if (!pool) return;
+    const a = pool[pool.i]; pool.i = (pool.i + 1) % pool.length;
+    try { a.pause(); a.currentTime = 0; a.volume = 1; const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) { /* */ }
+  }
+  function cue(name, meta) {
+    A.log.push(Object.assign({ cue: name, at: performance.now() }, meta || {}));
+    if (A.log.length > 300) A.log.shift();
+    if (!S.sound) return;
+    resumeAudio();
+    const ctx = A.ctx;
+    if (A.mode === 'webaudio' && ctx && ctx.state === 'running' && A.bufs[name]) {
+      try { const src = ctx.createBufferSource(); src.buffer = A.bufs[name]; src.connect(ctx.destination); src.start(); return; } catch (e) { /* Fallback */ }
+    }
+    playHTML(name);
   }
   const SND = {
-    tick: () => tone(740, 0.12, 0, 0.3, 'triangle'),
-    work: () => { tone(880, 0.12, 0, 0.35, 'square'); tone(1320, 0.28, 0.13, 0.32, 'square'); },
-    rest: () => { tone(660, 0.16, 0, 0.3, 'triangle'); tone(440, 0.3, 0.17, 0.3, 'triangle'); },
-    side: () => { tone(990, 0.1, 0, 0.3); tone(990, 0.1, 0.16, 0.3); },
-    done: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, i * 0.14, 0.3, 'triangle')); }
+    start: () => cue('start'), half: () => cue('half'), tick: () => cue('tick'), end: () => cue('end'), done: () => cue('done')
   };
-  let deVoice = null;
+  ['visibilitychange', 'pageshow', 'focus'].forEach((ev) => window.addEventListener(ev, () => { if (!document.hidden) resumeAudio(); }));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeAudio(); });
+  // Erster Tap irgendwo entsperrt ebenfalls
+  ['touchend', 'click'].forEach((ev) => document.addEventListener(ev, () => { if (!A.unlocked) unlockAudio(); else resumeAudio(); }, { capture: true, passive: true }));
+
+  let deVoice = null, speechUnlocked = false;
   function pickVoice() {
     if (!('speechSynthesis' in window)) return;
     const vs = speechSynthesis.getVoices().filter((v) => /^de(-|_|$)/i.test(v.lang));
     deVoice = vs.find((v) => /anna|helena|petra|markus|google deutsch/i.test(v.name)) || vs.find((v) => v.localService) || vs[0] || null;
   }
   if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+  function unlockSpeech() {
+    if (speechUnlocked || !('speechSynthesis' in window)) return;
+    try { const u = new SpeechSynthesisUtterance('.'); u.volume = 0; u.lang = 'de-DE'; speechSynthesis.speak(u); speechUnlocked = true; } catch (e) { /* */ }
+  }
   function speak(text) {
-    if (!S.voice || !('speechSynthesis' in window)) return;
+    if (!S.voice || !S.sound || !('speechSynthesis' in window)) return;
     try {
-      speechSynthesis.cancel();
+      if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+      speechSynthesis.resume && speechSynthesis.resume();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'de-DE'; if (deVoice) u.voice = deVoice; u.rate = 1.04; u.pitch = 1; u.volume = 1;
-      speechSynthesis.speak(u);
+      // nach den Signaltönen sprechen, damit nichts verschluckt wird
+      setTimeout(() => { try { speechSynthesis.speak(u); } catch (e) { /* */ } }, 450);
     } catch (e) { /* */ }
+  }
+  function testSound() {
+    unlockAudio();
+    const seq = [['start', 0], ['half', 900], ['tick', 1700], ['tick', 2700], ['tick', 3700], ['end', 4700]];
+    const was = S.sound; S.sound = true;
+    seq.forEach(([n, t]) => setTimeout(() => cue(n, { test: true }), t + 120));
+    setTimeout(() => { S.sound = was; if (S.voice) speak('Ton-Test. So klingt die Sprachansage.'); }, 5600);
   }
 
   // ───────────── Wake Lock ─────────────
@@ -395,7 +493,7 @@
   }
   function enterPhase(i, startTs, silent) {
     P.i = i; const ph = P.phases[i];
-    P.dur = ph.dur; P.endAt = startTs + ph.dur * 1000; P.lastSec = Math.ceil(ph.dur); P.half = false;
+    P.dur = ph.dur; P.endAt = startTs + ph.dur * 1000; P.lastSec = Math.ceil(ph.dur); P.half = false; P.fired = {}; P.phStart = startTs;
     const e = BY[ph.ex];
     const scr = $('#screen-player');
     scr.dataset.phase = ph.type;
@@ -411,15 +509,17 @@
     $('#p-sides').classList.add('hidden');
     if (!P.anim || P.anim.ex !== e.id) { Figure.stopAll($('#screen-player')); P.anim = Figure.animate($('#p-figure'), e); P.anim.ex = e.id; }
     renderTime(ph.dur);
+    resumeAudio();
     if (silent) return;
+    const meta = { phase: ph.type, i, t: 0 };
     if (ph.type === 'work') {
-      SND.work();
+      cue('start', meta);
       const prev = P.phases[i - 1];
       speak(prev && prev.type !== 'work' ? 'Los!' : `${e.name}. Los!`);
     } else if (ph.type === 'rest') {
-      SND.rest(); speak(`Pause. Als Nächstes: ${e.name}.`);
+      speak(`Pause. Als Nächstes: ${e.name}.`);
     } else if (ph.type === 'roundRest') {
-      SND.rest(); speak(`Runde ${ph.round} geschafft. Pause. Danach: ${e.name}.`);
+      speak(`Runde ${ph.round} geschafft. Pause. Danach: ${e.name}.`);
     } else if (ph.type === 'prep') {
       speak(`Mach dich bereit. Erste Übung: ${e.name}.`);
     }
@@ -451,18 +551,27 @@
       if (P.i >= P.phases.length - 1) { finish(); return; }
       const nextStart = P.endAt;
       const catchingUp = now - nextStart > 1500; // z. B. nach Hintergrund – keine Ansagen-Lawine
+      if (ph.type === 'work' && !catchingUp && !(P.phases[P.i + 1] && P.phases[P.i + 1].type === 'work')) cue('end', { phase: 'work', i: P.i, t: ph.dur });
       enterPhase(P.i + 1, nextStart, catchingUp);
       left = (P.endAt - now) / 1000;
     }
     const ph = P.phases[P.i];
-    const sec = Math.ceil(left);
-    if (sec !== P.lastSec) {
-      P.lastSec = sec;
-      if (sec <= 3 && sec >= 1 && ph.dur > 3) SND.tick();
-    }
-    if (ph.type === 'work' && BY[ph.ex].sides && !P.half && left <= ph.dur / 2) {
-      P.half = true; SND.side(); speak('Seite wechseln!');
-      const sd = $('#p-sides'); sd.classList.remove('hidden'); setTimeout(() => sd.classList.add('hidden'), 2500);
+    // Zeitbasierte Signale: jedes genau einmal, verpasste (älter als 0,9 s) werden nicht nachgeholt
+    const el = ph.dur - left, meta = { phase: ph.type, i: P.i };
+    if (ph.dur > 3) [3, 2, 1].forEach((thr) => {
+      const k = 't' + thr;
+      if (!P.fired[k] && left <= thr) { P.fired[k] = true; if (left > thr - 0.9) cue('tick', Object.assign({ t: +el.toFixed(2), n: thr }, meta)); }
+    });
+    const wantHalf = ph.type === 'work' ? ph.dur >= 8 : (ph.type !== 'prep' && ph.dur >= 30);
+    if (wantHalf && !P.fired.half && left <= ph.dur / 2) {
+      P.fired.half = true;
+      if (left > ph.dur / 2 - 0.9) {
+        cue('half', Object.assign({ t: +el.toFixed(2) }, meta));
+        if (ph.type === 'work' && BY[ph.ex].sides) {
+          speak('Seite wechseln!');
+          const sd = $('#p-sides'); sd.classList.remove('hidden'); setTimeout(() => sd.classList.add('hidden'), 2500);
+        } else if (ph.type === 'work') speak('Halbzeit');
+      }
     }
     renderTime(left);
   }
@@ -476,7 +585,7 @@
     renderPauseBtn();
   }
   function renderPauseBtn() { const b = $('#btn-pause'); b.innerHTML = P.paused ? PLAY : PAUSE; b.setAttribute('aria-label', P.paused ? 'Weiter' : 'Pause'); }
-  function renderVoiceBtn() { const b = $('#btn-voice'); b.innerHTML = S.voice ? VOICE_ON : VOICE_OFF; b.style.color = S.voice ? '' : 'var(--dim)'; }
+  function renderVoiceBtn() { const b = $('#btn-voice'); b.innerHTML = S.sound ? VOICE_ON : VOICE_OFF; b.style.color = S.sound ? '' : 'var(--dim)'; b.setAttribute('aria-label', S.sound ? 'Ton aus' : 'Ton an'); }
   function jump(to) {
     const was = P.paused;
     to = Math.max(0, Math.min(P.phases.length - 1, to));
@@ -505,7 +614,7 @@
     const work = P.workSec;
     const real = Math.round((Date.now() - P.startedAt) / 1000);
     stopPlayer();
-    SND.done(); speak('Geschafft! Starke Leistung.');
+    cue('end', { phase: 'work', i: P.i, t: P.dur }); setTimeout(() => cue('done', { phase: 'finish' }), 700); speak('Geschafft! Starke Leistung.');
     const h = load(LS.history, []);
     h.push({ date: new Date().toISOString(), duration: real, work, exercises: P.done.length, rounds: S.rounds });
     save(LS.history, h.slice(-100));
@@ -541,7 +650,7 @@
   $('#btn-next').addEventListener('click', skip);
   $('#btn-prev').addEventListener('click', back);
   $('#p-info').addEventListener('click', () => { $('#screen-player').classList.toggle('info-open'); haptic(6); });
-  $('#btn-voice').addEventListener('click', () => { S.voice = !S.voice; persist(); renderVoiceBtn(); if (S.voice) speak('Sprachansage an'); else try { speechSynthesis.cancel(); } catch (e) { /* */ } renderSetup(); });
+  $('#btn-voice').addEventListener('click', () => { unlockAudio(); S.sound = !S.sound; persist(); renderVoiceBtn(); if (S.sound) cue('tick'); else try { speechSynthesis.cancel(); } catch (e) { /* */ } renderSetup(); });
   $('#btn-close').addEventListener('click', () => {
     const wasPaused = P.paused; setPaused(true);
     if (confirm('Training beenden?')) { stopPlayer(); show('screen-setup'); } else if (!wasPaused) setPaused(false);
@@ -565,5 +674,5 @@
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
   // Test-/Debug-Zugriff
-  window.HIIT = { S, get plan() { return plan; }, P, generatePlan, available, totalSeconds, buildPhases, openDetail };
+  window.HIIT = { A, cue, testSound, S, get plan() { return plan; }, P, generatePlan, available, totalSeconds, buildPhases, openDetail };
 })();
