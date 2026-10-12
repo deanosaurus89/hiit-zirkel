@@ -1,7 +1,7 @@
 /* Strichfiguren-Engine: Posen (IK/FK) -> Winkel -> Interpolation -> SVG */
 (function () {
   'use strict';
-  const L = { torso: 24, neck: 8, head: 5.6, ua: 12, fa: 11, th: 16, sh: 15 };
+  const L = { torso: 24, neck: 8, head: 4.7, ua: 12, fa: 11, th: 16, sh: 15 };
   const FLOOR = 92;
   const D2R = Math.PI / 180;
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -89,27 +89,67 @@
     return o;
   }
 
+  // ───────── Muskeln → Körpersegmente (side: +1 = Vorderseite des Segments, −1 = Rückseite) ─────────
+  const MUSCLE_SEG = {
+    chest: [['torso', 0.6, 0.93, 1]],
+    abs: [['torso', 0.1, 0.62, 1]],
+    obliques: [['torso', 0.12, 0.64, 0]],
+    core: [['torso', 0.08, 0.7, 0.35], ['torso', 0.1, 0.55, -0.35]],
+    lowback: [['torso', 0.05, 0.45, -1]],
+    back: [['torso', 0.5, 0.94, -1]],
+    lats: [['torso', 0.38, 0.88, -1], ['ua', 0.0, 0.18, 1]],
+    shoulders: [['ua', 0.0, 0.32, 0], ['torso', 0.9, 1.0, 0]],
+    biceps: [['ua', 0.28, 0.9, -1]],
+    triceps: [['ua', 0.25, 0.9, 1]],
+    forearm: [['fa', 0.08, 0.6, 0]],
+    glutes: [['torso', 0.0, 0.12, -1], ['th', 0.0, 0.3, 1]],
+    abductors: [['th', 0.0, 0.3, 0], ['torso', 0, 0.1, 0]],
+    quads: [['th', 0.15, 0.9, -1]],
+    hams: [['th', 0.22, 0.9, 1]],
+    adductors: [['th', 0.15, 0.8, 0]],
+    hipflex: [['th', 0.0, 0.3, -1], ['torso', 0.0, 0.14, 1]],
+    calves: [['sh', 0.08, 0.5, 1]]
+  };
+  const W = { torso: 8.2, ua: 4.2, fa: 3.5, th: 6.0, sh: 4.6 };
+
   const cache = new Map();
   function prepare(ex) {
     if (cache.has(ex.id)) return cache.get(ex.id);
     const frames = ex.frames.map((p) => toAngles(solve(p, ex.view)));
-    // Bounding-Box über alle Keyframes -> Zentrierung/Skalierung
+    const joints = frames.map(fromAngles);
+    const prep = { frames, joints };
+    cache.set(ex.id, prep);
+    // Bounding-Box über den gesamten Zyklus -> Zentrierung/Skalierung
     let minX = 1e9, maxX = -1e9, minY = 1e9;
     const consider = (pt, r = 0) => { minX = Math.min(minX, pt[0] - r); maxX = Math.max(maxX, pt[0] + r); minY = Math.min(minY, pt[1] - r); };
-    frames.forEach((F) => {
-      const j = fromAngles(F);
-      Object.keys(j).forEach((k) => consider(j[k], k === 'head' ? L.head : 2.5));
+    const cyc = cycleLen(ex), N = 48;
+    const samples = [];
+    for (let i = 0; i < N; i++) samples.push(poseAt(ex, (i / N) * cyc));
+    samples.concat(joints).forEach((j) => {
+      Object.keys(j).forEach((k) => consider(j[k], k === 'head' ? L.head : 3.2));
       (ex.props || []).forEach((pr) => {
         if (pr.type === 'wheel') consider(j[pr.at || 'w1'], 4.5);
         if (pr.type === 'chair') { consider([pr.x, pr.y]); consider([pr.x + pr.w, pr.y]); if (pr.back) consider([pr.back === 'left' ? pr.x : pr.x + pr.w, pr.y - 24]); }
         if (pr.type === 'wall') { consider([pr.x - 4, 60]); }
       });
     });
+    // Bewegungsspur: Gelenk mit dem längsten Weg (bevorzugt die nahe Seite)
+    let best = null, bestLen = 0;
+    const cand = ex.track ? [ex.track] : ['w1', 'f1', 'k1', 'head', 'h', 'e1', 'w2', 'f2'];
+    cand.forEach((k, ci) => {
+      let len = 0;
+      for (let i = 0; i < N; i++) { const a = samples[i][k], b = samples[(i + 1) % N][k]; len += Math.hypot(a[0] - b[0], a[1] - b[1]); }
+      len *= 1 - ci * 0.02;
+      if (len > bestLen) { bestLen = len; best = k; }
+    });
+    prep.track = bestLen > 10 ? best : null;
+    prep.trail = prep.track ? samples.map((j) => j[prep.track]) : null;
     const w = maxX - minX;
-    const s = Math.min(1, 90 / w, 84 / (FLOOR - minY));
+    const s = Math.min(1.05, 90 / w, 78 / (FLOOR - minY));
     const cx = (minX + maxX) / 2;
-    const prep = { frames, transform: `translate(50 ${FLOOR}) scale(${s.toFixed(4)}) translate(${(-cx).toFixed(2)} ${-FLOOR})`, scale: s };
-    cache.set(ex.id, prep);
+    prep.transform = `translate(50 ${FLOOR}) scale(${s.toFixed(4)}) translate(${(-cx).toFixed(2)} ${-FLOOR})`;
+    prep.scale = s;
+    prep.ready = true;
     return prep;
   }
 
@@ -119,25 +159,34 @@
     if (parent) parent.appendChild(e);
     return e;
   }
-
-  const P = (pts) => pts.map((p) => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' ');
+  const f2 = (v) => v.toFixed(2);
+  const P = (pts) => pts.map((p) => f2(p[0]) + ',' + f2(p[1])).join(' ');
 
   function footPts(knee, ankle, view) {
     if (view === 'front') return null;
     const dx = ankle[0] - knee[0], dy = ankle[1] - knee[1];
     const len = Math.hypot(dx, dy) || 1;
-    let toe = [ankle[0] + (dy / len) * 4.2, ankle[1] - (dx / len) * 4.2];
+    let toe = [ankle[0] + (dy / len) * 4.6, ankle[1] - (dx / len) * 4.6];
+    const heel = [ankle[0] - (dy / len) * 1.2 + (dx / len) * 0.8, ankle[1] + (dx / len) * 1.2 + (dy / len) * 0.8];
     if (Math.abs(dx / len) < 0.5 && ankle[1] > 84 && ankle[1] < FLOOR) {
       const h = FLOOR - ankle[1];
-      const fx = Math.sqrt(Math.max(0, 4.2 * 4.2 - h * h));
+      const fx = Math.sqrt(Math.max(0, 4.6 * 4.6 - h * h));
       toe = [ankle[0] + fx, FLOOR];
     }
-    return [ankle, toe];
+    return [heel, ankle, toe];
   }
+  const seg = (a, b, fa, fb, side, w) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+    const px = -dy / l * side * w * 0.24, py = dx / l * side * w * 0.24;
+    return [[a[0] + dx * fa + px, a[1] + dy * fa + py], [a[0] + dx * fb + px, a[1] + dy * fb + py]];
+  };
 
-  // Erzeugt ein SVG mit Figur; gibt update(j)-Funktion zurück
-  function build(svg, ex) {
+  // Erzeugt ein SVG mit Figur; gibt update(j, t)-Funktion zurück
+  function build(svg, ex, opts) {
+    opts = opts || {};
+    const cues = !!opts.cues;
     const prep = prepare(ex);
+    const front = ex.view === 'front';
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.classList.add('fig');
     while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -148,7 +197,7 @@
     (ex.props || []).forEach((pr) => {
       if (pr.type === 'chair') {
         const x = pr.x, y = pr.y, w = pr.w;
-        el('rect', { x, y: y - 1.2, width: w, height: 3, rx: 1.2, class: 'prop-solid' }, back);
+        el('rect', { x, y: y - 1.4, width: w, height: 3.2, rx: 1.2, class: 'prop-solid' }, back);
         el('line', { x1: x + 1.5, y1: y + 1, x2: x + 1.5, y2: FLOOR, class: 'prop-line' }, back);
         el('line', { x1: x + w - 1.5, y1: y + 1, x2: x + w - 1.5, y2: FLOOR, class: 'prop-line' }, back);
         if (pr.back) { const bx = pr.back === 'left' ? x + 1.5 : x + w - 1.5; el('line', { x1: bx, y1: y, x2: bx, y2: y - 24, class: 'prop-line' }, back); }
@@ -156,78 +205,221 @@
         el('rect', { x: pr.x - 5, y: 4, width: 5, height: FLOOR - 4, class: 'prop-wall' }, back);
       }
     });
-    const mk = (cls) => el('polyline', { class: cls, points: '' }, g);
-    const farArm = mk('limb far'), farLeg = mk('limb far'), farFoot = mk('limb far foot');
-    const torso = mk('limb body'), neck = mk('limb body');
-    const head = el('circle', { class: 'head', r: L.head, cx: 0, cy: 0 }, g);
-    const nearLeg = mk('limb near'), nearFoot = mk('limb near foot'), nearArm = mk('limb near');
-    const front = el('g', {}, g);
+    // Geist der Startposition
+    if (cues && prep.joints.length > 1 && !ex.noGhost) {
+      const gj = prep.joints[0];
+      const gg = el('g', { class: 'ghost' }, g);
+      [[gj.s2, gj.e2, gj.w2], [gj.h2, gj.k2, gj.f2], [gj.h, gj.s], [gj.h1, gj.k1, gj.f1], [gj.s1, gj.e1, gj.w1]].forEach((pts) => el('polyline', { points: P(pts) }, gg));
+      el('circle', { cx: f2(gj.head[0]), cy: f2(gj.head[1]), r: L.head }, gg);
+    }
+    // Bewegungsspur
+    let arrow = null;
+    if (cues && prep.trail) {
+      el('polyline', { class: 'trail', points: P(prep.trail.concat([prep.trail[0]])) }, g);
+    }
+    const hi = {};
+    (ex.mp || []).forEach((m) => { hi[m] = 'p'; });
+    (ex.ms || []).forEach((m) => { if (!hi[m]) hi[m] = 's'; });
+    const overlaysFor = (segName) => {
+      const out = [];
+      Object.keys(hi).forEach((m) => (MUSCLE_SEG[m] || []).forEach((d) => { if (d[0] === segName) out.push({ lvl: hi[m], fa: d[1], fb: d[2], side: front ? 0 : d[3] }); }));
+      return out;
+    };
+    const parts = [];
+    function part(name, a, b, layer, w) {
+      const grp = el('g', { class: 'part ' + layer }, g);
+      const base = el('line', { class: 'bone', 'stroke-width': w }, grp);
+      const ov = overlaysFor(name).map((o) => ({ o, n: el('line', { class: 'mus ' + o.lvl, 'stroke-width': f2(w * (front ? 0.62 : 0.5)) }, grp) }));
+      parts.push({ a, b, base, ov, w });
+      return grp;
+    }
+    const layer2 = front ? 'near' : 'far';
+    part('ua', 's2', 'e2', layer2, W.ua); part('fa', 'e2', 'w2', layer2, W.fa);
+    const hand2 = el('circle', { class: 'hand ' + layer2, r: 1.9 }, g);
+    part('th', 'h2', 'k2', layer2, W.th); part('sh', 'k2', 'f2', layer2, W.sh);
+    const foot2 = el('polyline', { class: 'footp ' + layer2 }, g);
+    // Rumpf
+    const torsoG = el('g', { class: 'part near' }, g);
+    const torsoPoly = el('polygon', { class: 'torso' }, torsoG);
+    const torsoOv = overlaysFor('torso').map((o) => ({ o, n: el('line', { class: 'mus ' + o.lvl, 'stroke-width': front ? 6 : 3.6 }, torsoG) }));
+    const neck = el('line', { class: 'bone neck', 'stroke-width': 3 }, g);
+    const head = el('circle', { class: 'head', r: L.head }, g);
+    const face = front ? null : el('circle', { class: 'face', r: 0.9 }, g);
+    part('th', 'h1', 'k1', 'near', W.th); part('sh', 'k1', 'f1', 'near', W.sh);
+    const foot1 = el('polyline', { class: 'footp near' }, g);
+    part('ua', 's1', 'e1', 'near', W.ua); part('fa', 'e1', 'w1', 'near', W.fa);
+    const hand1 = el('circle', { class: 'hand near', r: 1.9 }, g);
+
+    const fr = el('g', {}, g);
     const dyn = [];
     (ex.props || []).forEach((pr) => {
-      if (pr.type === 'band') dyn.push({ pr, node: el('polyline', { class: 'prop-band' + (pr.far ? ' far' : ''), points: '' }, front) });
+      if (pr.type === 'band') dyn.push({ pr, node: el('path', { class: 'prop-band' + (pr.far ? ' far' : '') }, fr) });
       if (pr.type === 'wheel') {
-        const gg = el('g', {}, front);
-        el('circle', { r: 4, cx: 0, cy: 0, class: 'prop-wheel' }, gg);
+        const gg = el('g', {}, fr);
+        el('rect', { x: -6.2, y: -0.7, width: 12.4, height: 1.4, rx: 0.7, class: 'prop-axle' }, gg);
+        const wh = el('g', {}, gg);
+        el('circle', { r: 4, cx: 0, cy: 0, class: 'prop-wheel' }, wh);
+        el('line', { x1: -2.6, y1: 0, x2: 2.6, y2: 0, class: 'prop-spoke' }, wh);
+        el('line', { x1: 0, y1: -2.6, x2: 0, y2: 2.6, class: 'prop-spoke' }, wh);
         el('circle', { r: 1.1, cx: 0, cy: 0, class: 'prop-hub' }, gg);
-        dyn.push({ pr, node: gg });
+        dyn.push({ pr, node: gg, wh });
       }
       if (pr.type === 'bars') {
-        ['w2', 'w1'].forEach((wk) => dyn.push({ pr, wk, node: el('path', { class: 'prop-bars' + (wk === 'w2' ? ' far' : ''), d: '' }, front) }));
+        ['w2', 'w1'].forEach((wk) => dyn.push({ pr, wk, node: el('path', { class: 'prop-bars' + (wk === 'w2' ? ' far' : '') }, fr) }));
       }
     });
-    if (ex.view === 'front') { farArm.setAttribute('class', 'limb near'); farLeg.setAttribute('class', 'limb near'); }
+    if (cues && prep.trail) arrow = el('path', { class: 'arrow', d: 'M3.4 0 L-2 -2.6 L-0.8 0 L-2 2.6 Z' }, g);
+    let label = null;
+    if (cues && ex.phases) label = el('text', { class: 'phase-lbl', x: 50, y: 8, 'text-anchor': 'middle' }, svg);
+    let lastLabel = '';
 
-    function update(j) {
-      const ff = footPts(j.k2, j.f2, ex.view), nf = footPts(j.k1, j.f1, ex.view);
-      farArm.setAttribute('points', P([j.s2, j.e2, j.w2]));
-      farLeg.setAttribute('points', P([j.h2, j.k2, j.f2]));
-      farFoot.setAttribute('points', ff ? P(ff) : '');
-      torso.setAttribute('points', ex.view === 'front' ? P([j.h1, j.h, j.s, j.s1, j.s, j.s2, j.s, j.h, j.h2]) : P([j.h, j.s]));
-      neck.setAttribute('points', P([j.s, [j.s[0] + (j.head[0] - j.s[0]) * 0.4, j.s[1] + (j.head[1] - j.s[1]) * 0.4]]));
-      head.setAttribute('cx', j.head[0].toFixed(2)); head.setAttribute('cy', j.head[1].toFixed(2));
-      nearLeg.setAttribute('points', P([j.h1, j.k1, j.f1]));
-      nearFoot.setAttribute('points', nf ? P(nf) : '');
-      nearArm.setAttribute('points', P([j.s1, j.e1, j.w1]));
-      shadow.setAttribute('cx', ((j.f1[0] + j.f2[0] + j.h[0]) / 3).toFixed(2));
+    function setLine(n, p, q) { n.setAttribute('x1', f2(p[0])); n.setAttribute('y1', f2(p[1])); n.setAttribute('x2', f2(q[0])); n.setAttribute('y2', f2(q[1])); }
+    function update(j, info) {
+      parts.forEach((pt) => {
+        const a = j[pt.a], b = j[pt.b];
+        setLine(pt.base, a, b);
+        pt.ov.forEach(({ o, n }) => { const [p, q] = seg(a, b, o.fa, o.fb, o.side, pt.w); setLine(n, p, q); });
+      });
+      // Rumpf als Körper (Hüfte schmaler als Brustkorb)
+      const tdx = j.s[0] - j.h[0], tdy = j.s[1] - j.h[1], tl = Math.hypot(tdx, tdy) || 1;
+      const nx = -tdy / tl, ny = tdx / tl;
+      let poly;
+      if (front) {
+        const hw = 4.6, sw = 6.4;
+        poly = [[j.h[0] + nx * hw, j.h[1] + ny * hw], [j.s[0] + nx * sw, j.s[1] + ny * sw], [j.s[0] - nx * sw, j.s[1] - ny * sw], [j.h[0] - nx * hw, j.h[1] - ny * hw]];
+      } else {
+        const up = (f) => [j.h[0] + tdx * f, j.h[1] + tdy * f];
+        const at = (f, wf, wb) => { const c = up(f); return [[c[0] + nx * wf, c[1] + ny * wf], [c[0] - nx * wb, c[1] - ny * wb]]; };
+        const a0 = at(0, 3.3, 3.6), a1 = at(0.45, 3.0, 3.1), a2 = at(0.78, 4.0, 3.3), a3 = at(1, 2.6, 2.8);
+        poly = [a0[0], a1[0], a2[0], a3[0], a3[1], a2[1], a1[1], a0[1]];
+      }
+      torsoPoly.setAttribute('points', P(poly));
+      torsoOv.forEach(({ o, n }) => { const [p, q] = seg(j.h, j.s, o.fa, o.fb, o.side, front ? 12 : 13); setLine(n, p, q); });
+      setLine(neck, j.s, [j.s[0] + (j.head[0] - j.s[0]) * 0.5, j.s[1] + (j.head[1] - j.s[1]) * 0.5]);
+      head.setAttribute('cx', f2(j.head[0])); head.setAttribute('cy', f2(j.head[1]));
+      if (face) {
+        const hx = j.head[0] - j.s[0], hy = j.head[1] - j.s[1], hl = Math.hypot(hx, hy) || 1;
+        face.setAttribute('cx', f2(j.head[0] - hy / hl * 2.6)); face.setAttribute('cy', f2(j.head[1] + hx / hl * 2.6));
+      }
+      const hp = (e, w) => { const dx = w[0] - e[0], dy = w[1] - e[1], l = Math.hypot(dx, dy) || 1; return [w[0] + dx / l * 1.3, w[1] + dy / l * 1.3]; };
+      const h1p = hp(j.e1, j.w1), h2p = hp(j.e2, j.w2);
+      hand1.setAttribute('cx', f2(h1p[0])); hand1.setAttribute('cy', f2(h1p[1]));
+      hand2.setAttribute('cx', f2(h2p[0])); hand2.setAttribute('cy', f2(h2p[1]));
+      const nf = footPts(j.k1, j.f1, ex.view), ff = footPts(j.k2, j.f2, ex.view);
+      foot1.setAttribute('points', nf ? P(nf) : ''); foot2.setAttribute('points', ff ? P(ff) : '');
+      shadow.setAttribute('cx', f2((j.f1[0] + j.f2[0] + j.h[0]) / 3));
       dyn.forEach((d) => {
         const pr = d.pr;
         if (pr.type === 'band') {
           const a = Array.isArray(pr.from) ? pr.from : j[pr.from], b = Array.isArray(pr.to) ? pr.to : j[pr.to];
-          d.node.setAttribute('points', P([a, b]));
+          // Band unter dem Fuß: Ende am Boden unter dem Fußballen verankern
+          const A = (!Array.isArray(pr.from) && pr.from[0] === 'f') ? [a[0] + (front ? 0 : 1.8), Math.min(FLOOR, a[1] + 0.8)] : a;
+          d.node.setAttribute('d', `M${f2(A[0])} ${f2(A[1])} L${f2(b[0])} ${f2(b[1])}`);
         } else if (pr.type === 'wheel') {
           const c = j[pr.at || 'w1'];
-          d.node.setAttribute('transform', `translate(${c[0].toFixed(2)} ${c[1].toFixed(2)})`);
+          d.node.setAttribute('transform', `translate(${f2(c[0])} ${f2(c[1])})`);
+          d.wh.setAttribute('transform', `rotate(${f2((c[0] / 4) * 57.3)})`);
         } else if (pr.type === 'bars') {
           const c = j[d.wk];
-          const x = c[0], y = c[1] + 1;
-          d.node.setAttribute('d', `M${(x - 5).toFixed(2)} ${FLOOR} L${(x - 2.5).toFixed(2)} ${y.toFixed(2)} L${(x + 2.5).toFixed(2)} ${y.toFixed(2)} L${(x + 5).toFixed(2)} ${FLOOR}`);
+          const x = c[0], y = c[1] + 1.2;
+          d.node.setAttribute('d', `M${f2(x - 5.5)} ${FLOOR} L${f2(x - 2.6)} ${f2(y)} L${f2(x + 2.6)} ${f2(y)} L${f2(x + 5.5)} ${FLOOR} M${f2(x - 6.5)} ${FLOOR} L${f2(x - 4)} ${FLOOR} M${f2(x + 4)} ${FLOOR} L${f2(x + 6.5)} ${FLOOR}`);
         }
       });
+      if (arrow && info) {
+        const p = j[prep.track], q = info.next[prep.track];
+        const dx = q[0] - p[0], dy = q[1] - p[1], sp = Math.hypot(dx, dy);
+        if (sp > 0.25) {
+          arrow.setAttribute('transform', `translate(${f2(p[0])} ${f2(p[1])}) rotate(${f2(Math.atan2(dy, dx) * 57.2958)})`);
+          arrow.style.opacity = Math.min(1, sp / 1.2).toFixed(2);
+        } else arrow.style.opacity = '0';
+      }
+      if (label && info && ex.phases) {
+        const t = ex.phases[info.seg] || '';
+        if (t !== lastLabel) { label.textContent = t; lastLabel = t; }
+      }
     }
     return { update, prep };
   }
 
-  const ease = (x) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
-
-  function poseAt(ex, time) {
-    const prep = prepare(ex);
-    const fr = prep.frames;
-    if (fr.length === 1) return fromAngles(fr[0]);
+  // Zeitachse
+  const ease = (x) => 0.5 - 0.5 * Math.cos(Math.PI * x);
+  function cycleLen(ex) {
+    const n = ex.frames.length;
+    if (n === 1) return 1;
     const seg = ex.speed || 0.8, hold = ex.hold != null ? ex.hold : 0.12;
-    const cyc = (seg + hold) * fr.length;
-    let t = time % cyc;
-    const i = Math.floor(t / (seg + hold));
-    t = t - i * (seg + hold);
-    const k = t < hold ? 0 : ease((t - hold) / seg);
-    return fromAngles(interp(fr[i], fr[(i + 1) % fr.length], k));
+    return (seg + hold) * n;
   }
+  // Catmull-Rom auf Winkeln (glatte Bahnen über mehrere Schlüsselposen)
+  const KEYS = ['t', 'n', 'u1', 'f1', 'u2', 'f2', 't1', 'c1', 't2', 'c2'];
+  const near = (ref, v) => { let d = v - ref; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return ref + d; };
+  function cr(p0, p1, p2, p3, k) {
+    const k2 = k * k, k3 = k2 * k;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * k + (2 * p0 - 5 * p1 + 4 * p2 - p3) * k2 + (-p0 + 3 * p1 - 3 * p2 + p3) * k3);
+  }
+  function blend(fr, i, k) {
+    const n = fr.length;
+    const A = fr[(i - 1 + n) % n], B = fr[i], C = fr[(i + 1) % n], D = fr[(i + 2) % n];
+    if (n === 2) return interp(B, C, k);
+    const o = { so: B.so, ho: B.ho, h: [0, 0] };
+    for (let c = 0; c < 2; c++) o.h[c] = cr(A.h[c], B.h[c], C.h[c], D.h[c], k);
+    KEYS.forEach((key) => {
+      const b = B[key], c = near(b, C[key]), a = near(b, A[key]), d = near(c, D[key]);
+      o[key] = cr(a, b, c, d, k);
+    });
+    return o;
+  }
+  function crossSign(r, m, e) { return Math.sign((m[0] - r[0]) * (e[1] - r[1]) - (m[1] - r[1]) * (e[0] - r[0])) || 1; }
+  const LIMBS = [['s1', 'e1', 'w1', L.ua, L.fa], ['s2', 'e2', 'w2', L.ua, L.fa], ['h1', 'k1', 'f1', L.th, L.sh], ['h2', 'k2', 'f2', L.th, L.sh]];
+  function state(ex, time) {
+    const prep = cache.get(ex.id) || prepare(ex);
+    const fr = prep.frames, n = fr.length;
+    if (n === 1) return { j: fromAngles(fr[0]), seg: 0 };
+    const segT = ex.speed || 0.8, hold = ex.hold != null ? ex.hold : 0.12;
+    let t = ((time % cycleLen(ex)) + cycleLen(ex)) % cycleLen(ex);
+    const i = Math.min(n - 1, Math.floor(t / (segT + hold)));
+    t -= i * (segT + hold);
+    const x = t < hold ? 0 : (t - hold) / segT;
+    const k = n === 2 ? ease(x) : 0.35 * x + 0.65 * ease(x);
+    const j = fromAngles(blend(fr, i, k));
+    // Kontakte erhalten: Hände/Füße, die in beiden Posen am selben Ort oder auf derselben Höhe sind, per IK führen
+    const JA = prep.joints[i], JB = prep.joints[(i + 1) % n];
+    LIMBS.forEach(([r, m, e, l1, l2]) => {
+      const a = JA[e], b = JB[e];
+      if (Math.abs(a[1] - b[1]) > 0.6 || Math.hypot(a[0] - b[0], a[1] - b[1]) > 40) return;
+      if (a[1] < FLOOR - 16 && Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.6) return; // nur Bodenkontakt gleiten lassen
+      const target = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+      const dA = Math.hypot(JA[e][0] - JA[r][0], JA[e][1] - JA[r][1]), dB = Math.hypot(JB[e][0] - JB[r][0], JB[e][1] - JB[r][1]);
+      const sA = dA <= dB ? crossSign(JA[r], JA[m], JA[e]) : crossSign(JB[r], JB[m], JB[e]);
+      const [mid, end] = ik(j[r], target, l1, l2, 1);
+      const [mid2, end2] = ik(j[r], target, l1, l2, -1);
+      const pick = crossSign(j[r], mid, end) === sA ? [mid, end] : [mid2, end2];
+      j[m] = pick[0]; j[e] = pick[1];
+    });
+    // Boden: nichts darf durch den Boden gehen
+    if (ex.view !== 'front') LIMBS.forEach(([r, m, e, l1, l2]) => {
+      if (j[e][1] <= FLOOR + 0.3 && j[m][1] <= FLOOR - 1) return;
+      const target = [j[e][0], Math.min(j[e][1], FLOOR)];
+      const A = ik(j[r], target, l1, l2, 1), B = ik(j[r], target, l1, l2, -1);
+      const pick = (A[0][1] < B[0][1]) ? A : B;
+      j[m] = pick[0]; j[e] = pick[1];
+    });
+    return { j, seg: i };
+  }
+  function poseAt(ex, time) { return state(ex, time).j; }
 
-  // Statisches Bild
+  // Statisches Bild (Thumbnail) oder ein bestimmter Zeitpunkt (cues)
   function renderStatic(svg, ex, frameIdx) {
     const f = build(svg, ex);
     const fr = f.prep.frames;
     const idx = frameIdx != null ? frameIdx : (ex.thumb != null ? ex.thumb : Math.min(1, fr.length - 1));
     f.update(fromAngles(fr[Math.min(idx, fr.length - 1)]));
+    return svg;
+  }
+  function renderAt(svg, ex, frac) {
+    const f = build(svg, ex, { cues: true });
+    const T = cycleLen(ex) * frac;
+    const s = state(ex, T);
+    f.update(s.j, { seg: s.seg, next: poseAt(ex, T + 0.04) });
     return svg;
   }
 
@@ -238,19 +430,22 @@
     live.forEach((a) => {
       if (!a.svg.isConnected) { live.delete(a); return; }
       if (a.paused) return;
-      a.update(poseAt(a.ex, (ts - a.t0) / 1000));
+      const T = (ts - a.t0) / 1000;
+      const s = state(a.ex, T);
+      a.update(s.j, { seg: s.seg, next: poseAt(a.ex, T + 0.04) });
     });
     if (live.size) requestAnimationFrame(loop); else running = false;
   }
   function animate(svg, ex) {
-    const f = build(svg, ex);
+    const f = build(svg, ex, { cues: true });
     const a = { svg, ex, update: f.update, t0: performance.now(), paused: false };
-    a.update(poseAt(ex, 0));
+    const s = state(ex, 0);
+    a.update(s.j, { seg: s.seg, next: poseAt(ex, 0.04) });
     live.add(a);
     if (!running) { running = true; requestAnimationFrame(loop); }
     return { stop() { live.delete(a); }, pause(v) { a.paused = v; } };
   }
   function stopAll(container) { live.forEach((a) => { if (!container || container.contains(a.svg)) live.delete(a); }); }
 
-  window.Figure = { renderStatic, animate, stopAll, poseAt, prepare, solve, FLOOR };
+  window.Figure = { renderStatic, renderAt, animate, stopAll, poseAt, prepare, solve, FLOOR, MUSCLE_SEG };
 })();

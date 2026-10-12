@@ -101,6 +101,7 @@
           <div class="p-next-label" id="p-next-label">Als Nächstes</div>
           <h2 class="p-name" id="p-name">Hampelmann</h2>
           <div class="tags" id="p-tags"></div>
+          <div class="mus-legend small" id="p-legend"></div>
         </div>
         <div class="p-timer-row">
           <div class="ring">
@@ -110,10 +111,7 @@
             </svg>
             <div class="ring-num" id="p-time">30</div>
           </div>
-          <div class="p-info" id="p-info">
-            <p id="p-desc"></p>
-            <p class="tip" id="p-tip"></p>
-          </div>
+          <button class="p-info" id="p-info" aria-label="Anleitung vergrößern"></button>
         </div>
       </div>
 
@@ -152,13 +150,13 @@
       <div class="grabber"></div>
       <button class="icon-btn sheet-close" data-close aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       <div class="sheet-scroll">
-        <div class="d-stage"><svg id="d-figure" class="fig big"></svg></div>
+        <div class="d-stage"><svg id="d-figure" class="fig big" role="img" aria-label="Animation der Übung"></svg></div>
+        <div class="cue-legend"><span><i class="k-ghost"></i>Startposition</span><span><i class="k-trail"></i>Bewegungsbahn</span></div>
         <h2 id="d-name"></h2>
         <div class="d-en" id="d-en"></div>
         <div class="tags" id="d-tags"></div>
-        <p class="d-desc" id="d-desc"></p>
-        <div class="tipbox"><b>Technik-Tipp</b><span id="d-tip"></span></div>
-        <div class="d-muscles"><b>Muskeln:</b> <span id="d-muscles"></span></div>
+        <div class="mus-legend" id="d-legend"></div>
+        <div class="guide" id="d-guide"></div>
         <div id="d-swap-wrap">
           <h3 class="section-title">Austauschen gegen …</h3>
           <ol class="plan compact" id="d-swap"></ol>
@@ -179,6 +177,7 @@
   </div>
   <script src="figure.js"></script>
   <script src="exercises.js"></script>
+  <script src="guide.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -90,6 +90,32 @@
     if (e.sides && opts.sides !== false) h += '<span class="tag">Seitenwechsel</span>';
     return h;
   }
+  const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function legendHTML(e, compact) {
+    let h = `<span class="lg"><i class="dot p"></i>${compact ? '' : '<b>Hauptmuskeln:</b> '}${esc(e.muscles)}</span>`;
+    if (e.muscles2) h += `<span class="lg"><i class="dot s"></i>${compact ? '' : '<b>Hilfsmuskeln:</b> '}${esc(e.muscles2)}</span>`;
+    return h;
+  }
+  function guideHTML(e) {
+    if (!e.steps) return `<p class="d-desc">${esc(e.desc)}</p><div class="tipbox"><b>Technik-Tipp</b><span>${esc(e.tip)}</span></div>`;
+    let h = `<div class="g-block"><h4>Ausgangsposition</h4><p>${esc(e.start)}</p></div>`;
+    h += `<div class="g-block"><h4>Ausführung</h4><ol class="steps">${e.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol></div>`;
+    h += `<div class="g-block safe"><h4>Sicherheit &amp; Technik</h4><ul>${e.safe.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+    if (e.easy) h += `<div class="g-block easy"><h4>Leichtere Variante</h4><p>${esc(e.easy)}</p></div>`;
+    if (e.sides) h += '<p class="g-note">Nach der Hälfte der Zeit die Seite wechseln.</p>';
+    return h;
+  }
+  function playerInfoHTML(e, preview) {
+    if (!e.steps) return `<p>${esc(e.desc)}</p><p class="tip">💡 ${esc(e.tip)}</p>`;
+    let h = '';
+    if (preview) h += `<p class="pi-start"><b>Start:</b> ${esc(e.start)}</p>`;
+    h += `<ol class="steps">${e.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>`;
+    h += `<p class="tip">⚠︎ ${esc(e.safe[0])}</p>`;
+    if (preview && e.safe[1]) h += `<p class="tip">⚠︎ ${esc(e.safe[1])}</p>`;
+    if (preview && e.easy) h += `<p class="pi-easy"><b>Leichter:</b> ${esc(e.easy)}</p>`;
+    h += '<span class="pi-more">Tippen zum Vergrößern</span>';
+    return h;
+  }
   function thumbSVG(e) {
     const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     Figure.renderStatic(s, e);
@@ -254,9 +280,8 @@
     $('#d-name').textContent = e.name;
     $('#d-en').textContent = e.en;
     $('#d-tags').innerHTML = tagsHTML(e);
-    $('#d-desc').textContent = e.desc;
-    $('#d-tip').textContent = e.tip;
-    $('#d-muscles').textContent = e.muscles;
+    $('#d-legend').innerHTML = legendHTML(e);
+    $('#d-guide').innerHTML = guideHTML(e);
     const wrap = $('#d-swap-wrap');
     if (planIdx != null) {
       wrap.classList.remove('hidden');
@@ -380,8 +405,8 @@
     $('#p-next-label').textContent = ph.type === 'prep' ? 'Erste Übung' : 'Als Nächstes';
     $('#p-name').textContent = e.name;
     $('#p-tags').innerHTML = tagsHTML(e, { level: false });
-    $('#p-desc').textContent = e.desc;
-    $('#p-tip').textContent = '💡 ' + e.tip;
+    $('#p-legend').innerHTML = legendHTML(e, true);
+    $('#p-info').innerHTML = playerInfoHTML(e, ph.type !== 'work');
     $('#p-info').scrollTop = 0;
     $('#p-sides').classList.add('hidden');
     if (!P.anim || P.anim.ex !== e.id) { Figure.stopAll($('#screen-player')); P.anim = Figure.animate($('#p-figure'), e); P.anim.ex = e.id; }
@@ -515,6 +540,7 @@
   $('#btn-resume').addEventListener('click', () => setPaused(false));
   $('#btn-next').addEventListener('click', skip);
   $('#btn-prev').addEventListener('click', back);
+  $('#p-info').addEventListener('click', () => { $('#screen-player').classList.toggle('info-open'); haptic(6); });
   $('#btn-voice').addEventListener('click', () => { S.voice = !S.voice; persist(); renderVoiceBtn(); if (S.voice) speak('Sprachansage an'); else try { speechSynthesis.cancel(); } catch (e) { /* */ } renderSetup(); });
   $('#btn-close').addEventListener('click', () => {
     const wasPaused = P.paused; setPaused(true);
@@ -539,5 +565,5 @@
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
   // Test-/Debug-Zugriff
-  window.HIIT = { S, get plan() { return plan; }, P, generatePlan, available, totalSeconds, buildPhases };
+  window.HIIT = { S, get plan() { return plan; }, P, generatePlan, available, totalSeconds, buildPhases, openDetail };
 })();
