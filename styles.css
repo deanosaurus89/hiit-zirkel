@@ -290,3 +290,11 @@ h1 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
 #screen-player.info-open .p-stage { flex: 0 0 120px; min-height: 120px; }
 #screen-player.info-open .p-info { max-height: 44vh; }
 #screen-player.info-open .pi-more { visibility: hidden; }
+/* Balance Board & Turnringe */
+.prop-board { fill: #b5824f; }
+.prop-grip { fill: #2a2f3d; }
+.prop-dome { fill: #3b4460; }
+.prop-strap { stroke: #8d95a8; stroke-width: 1; stroke-linecap: round; }
+.prop-buckle { fill: #c9ced8; }
+.prop-ring { fill: none; stroke: #d9a066; stroke-width: 1.5; }
+.prop-ringset.far { opacity: .45; }

@@ -6,7 +6,7 @@
   const LS = { settings: 'hiit.settings.v1', plan: 'hiit.plan.v1', history: 'hiit.history.v1' };
   const PATTERN = ['cardio', 'lower', 'upper', 'core']; // Wechsel der Muskelgruppen wie im 7-Minuten-Workout
   const DEFAULTS = { count: 12, rounds: 2, work: 30, rest: 10, roundRest: 60, prep: 10,
-    equipment: { chair: true, bars: false, wheel: false, band: false }, sound: true, voice: true };
+    equipment: { chair: true, bars: false, wheel: false, band: false, board: false, rings: false }, sound: true, voice: true };
 
   const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* privat */ } };
@@ -72,7 +72,9 @@
     chair: '<svg viewBox="0 0 32 32"><path d="M10 4v24M10 17h13v11M10 17h13"/></svg>',
     bars: '<svg viewBox="0 0 32 32"><path d="M3 26l3-9h6l3 9M17 26l3-9h6l3 9M6 17h6M20 17h6"/></svg>',
     wheel: '<svg viewBox="0 0 32 32"><circle cx="16" cy="18" r="8"/><circle cx="16" cy="18" r="2"/><path d="M3 18h5M24 18h5"/></svg>',
-    band: '<svg viewBox="0 0 32 32"><path d="M5 26C5 12 9 6 13 6s4 8 3 12-1 10 3 10 8-6 8-22"/></svg>'
+    band: '<svg viewBox="0 0 32 32"><path d="M5 26C5 12 9 6 13 6s4 8 3 12-1 10 3 10 8-6 8-22"/></svg>',
+    board: '<svg viewBox="0 0 32 32"><path d="M3 19.5l26-3M3 21.5l26-3"/><path d="M11 21c0 4 3 6 5 6s5-2 5-7"/></svg>',
+    rings: '<svg viewBox="0 0 32 32"><path d="M10 2v14M22 2v14"/><circle cx="10" cy="21" r="5"/><circle cx="22" cy="21" r="5"/></svg>'
   };
   const CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>';
   const SWAP = '<svg viewBox="0 0 24 24"><path d="M7 7h13l-4-4M17 17H4l4 4"/></svg>';

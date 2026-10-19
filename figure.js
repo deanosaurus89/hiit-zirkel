@@ -131,6 +131,8 @@
         if (pr.type === 'wheel') consider(j[pr.at || 'w1'], 4.5);
         if (pr.type === 'chair') { consider([pr.x, pr.y]); consider([pr.x + pr.w, pr.y]); if (pr.back) consider([pr.back === 'left' ? pr.x : pr.x + pr.w, pr.y - 24]); }
         if (pr.type === 'wall') { consider([pr.x - 4, 60]); }
+        if (pr.type === 'board') { consider([pr.x - 10.5, FLOOR - 6]); consider([pr.x + 10.5, FLOOR - 6]); }
+        if (pr.type === 'rings') { consider(j.w1, 4.5); consider(j.w2, 4.5); }
       });
     });
     // Bewegungsspur: Gelenk mit dem längsten Weg (bevorzugt die nahe Seite)
@@ -162,17 +164,19 @@
   const f2 = (v) => v.toFixed(2);
   const P = (pts) => pts.map((p) => f2(p[0]) + ',' + f2(p[1])).join(' ');
 
-  function footPts(knee, ankle, view) {
+  const BOARD_TOP = FLOOR - 4.5;
+  function footPts(knee, ankle, view, gy) {
     if (view === 'front') return null;
+    gy = gy || FLOOR;
     const dx = ankle[0] - knee[0], dy = ankle[1] - knee[1];
     const len = Math.hypot(dx, dy) || 1;
     let toe = [ankle[0] + (dy / len) * 4.6, ankle[1] - (dx / len) * 4.6];
     const heel = [ankle[0] - (dy / len) * 1.2 + (dx / len) * 0.8, ankle[1] + (dx / len) * 1.2 + (dy / len) * 0.8];
-    if (Math.abs(dx / len) < 0.5 && ankle[1] > 84 && ankle[1] < FLOOR) {
-      const h = FLOOR - ankle[1];
+    if (Math.abs(dx / len) < 0.5 && ankle[1] > gy - 8 && ankle[1] < gy) {
+      const h = gy - ankle[1];
       const fx = Math.sqrt(Math.max(0, 4.6 * 4.6 - h * h));
-      toe = [ankle[0] + fx, FLOOR];
-    }
+      toe = [ankle[0] + fx, gy];
+    } else if (Math.abs(ankle[1] - gy) < 0.6) toe = [ankle[0] + 4.6, gy];
     return [heel, ankle, toe];
   }
   const seg = (a, b, fa, fb, side, w) => {
@@ -194,6 +198,7 @@
     const g = el('g', { transform: prep.transform }, svg);
     const shadow = el('ellipse', { class: 'fig-shadow', cx: 50, cy: FLOOR + 0.6, rx: 14, ry: 1.6 }, g);
     const back = el('g', {}, g);
+    const dynBack = [];
     (ex.props || []).forEach((pr) => {
       if (pr.type === 'chair') {
         const x = pr.x, y = pr.y, w = pr.w;
@@ -203,6 +208,13 @@
         if (pr.back) { const bx = pr.back === 'left' ? x + 1.5 : x + w - 1.5; el('line', { x1: bx, y1: y, x2: bx, y2: y - 24, class: 'prop-line' }, back); }
       } else if (pr.type === 'wall') {
         el('rect', { x: pr.x - 5, y: 4, width: 5, height: FLOOR - 4, class: 'prop-wall' }, back);
+      } else if (pr.type === 'board') {
+        // Rundes Wackelbrett (Ø 40 cm, 8 cm hoch) mit Halbkugel darunter – kippt um den Auflagepunkt
+        const bg = el('g', {}, back);
+        el('path', { class: 'prop-dome', d: `M${pr.x - 5} ${BOARD_TOP + 1.4} Q${pr.x - 5} ${FLOOR} ${pr.x} ${FLOOR} Q${pr.x + 5} ${FLOOR} ${pr.x + 5} ${BOARD_TOP + 1.4} Z` }, bg);
+        el('rect', { class: 'prop-board', x: pr.x - 9.6, y: BOARD_TOP, width: 19.2, height: 1.5, rx: 0.6 }, bg);
+        el('rect', { class: 'prop-grip', x: pr.x - 9.2, y: BOARD_TOP - 0.25, width: 18.4, height: 0.5, rx: 0.25 }, bg);
+        dynBack.push({ pr, node: bg });
       }
     });
     // Geist der Startposition
@@ -267,8 +279,20 @@
       if (pr.type === 'bars') {
         ['w2', 'w1'].forEach((wk) => dyn.push({ pr, wk, node: el('path', { class: 'prop-bars' + (wk === 'w2' ? ' far' : '') }, fr) }));
       }
+      if (pr.type === 'rings') {
+        // Turnringe: Gurt von der Decke (oberhalb des Bildes) zum Ring, Hand greift unten im Ring
+        ['w2', 'w1'].forEach((wk) => {
+          const gg = el('g', { class: 'prop-ringset' + (wk === 'w2' ? ' far' : '') }, wk === 'w2' ? back : fr);
+          const strap = el('line', { class: 'prop-strap' }, gg);
+          const buckle = el('rect', { class: 'prop-buckle', width: 1.8, height: 1.2, rx: 0.3 }, gg);
+          const ring = el('circle', { class: 'prop-ring', r: 3.4 }, gg);
+          dyn.push({ pr, wk, node: gg, strap, buckle, ring });
+        });
+      }
     });
     if (cues && prep.trail) arrow = el('path', { class: 'arrow', d: 'M3.4 0 L-2 -2.6 L-0.8 0 L-2 2.6 Z' }, g);
+    const boardPr = (ex.props || []).find((pr) => pr.type === 'board');
+    const boardX = boardPr ? boardPr.x : null;
     let label = null;
     if (cues && ex.phases) label = el('text', { class: 'phase-lbl', x: 50, y: 8, 'text-anchor': 'middle' }, svg);
     let lastLabel = '';
@@ -305,7 +329,14 @@
       const h1p = hp(j.e1, j.w1), h2p = hp(j.e2, j.w2);
       hand1.setAttribute('cx', f2(h1p[0])); hand1.setAttribute('cy', f2(h1p[1]));
       hand2.setAttribute('cx', f2(h2p[0])); hand2.setAttribute('cy', f2(h2p[1]));
-      const nf = footPts(j.k1, j.f1, ex.view), ff = footPts(j.k2, j.f2, ex.view);
+      const gyOf = (a) => (boardX != null && Math.abs(a[1] - BOARD_TOP) < 2 && Math.abs(a[0] - boardX) < 11) ? BOARD_TOP : FLOOR;
+      const nf = footPts(j.k1, j.f1, ex.view, gyOf(j.f1)), ff = footPts(j.k2, j.f2, ex.view, gyOf(j.f2));
+      dynBack.forEach((d) => {
+        let tilt = 0;
+        if (d.pr.tilt === 'feet') tilt = Math.max(-14, Math.min(14, Math.atan2(j.f1[1] - j.f2[1], j.f1[0] - j.f2[0]) * 57.3));
+        else if (info && info.T != null) tilt = (d.pr.wob != null ? d.pr.wob : 2.5) * Math.sin(info.T * 2 * Math.PI / 1.7);
+        d.node.setAttribute('transform', `rotate(${f2(tilt)} ${d.pr.x} ${FLOOR})`);
+      });
       foot1.setAttribute('points', nf ? P(nf) : ''); foot2.setAttribute('points', ff ? P(ff) : '');
       shadow.setAttribute('cx', f2((j.f1[0] + j.f2[0] + j.h[0]) / 3));
       dyn.forEach((d) => {
@@ -319,6 +350,15 @@
           const c = j[pr.at || 'w1'];
           d.node.setAttribute('transform', `translate(${f2(c[0])} ${f2(c[1])})`);
           d.wh.setAttribute('transform', `rotate(${f2((c[0] / 4) * 57.3)})`);
+        } else if (pr.type === 'rings') {
+          const c = d.wk === 'w1' ? h1p : h2p;
+          const ax = (d.wk === 'w2' && pr.ax2 != null) ? pr.ax2 : pr.ax, ay = -120;
+          const dx = ax - c[0], dy = ay - c[1], l = Math.hypot(dx, dy) || 1;
+          const rc = [c[0] + dx / l * 2.6, c[1] + dy / l * 2.6], top = [rc[0] + dx / l * 3.4, rc[1] + dy / l * 3.4];
+          d.ring.setAttribute('cx', f2(rc[0])); d.ring.setAttribute('cy', f2(rc[1]));
+          d.strap.setAttribute('x1', f2(top[0])); d.strap.setAttribute('y1', f2(top[1])); d.strap.setAttribute('x2', f2(ax)); d.strap.setAttribute('y2', ay);
+          const bk = [top[0] + dx / l * 9, top[1] + dy / l * 9];
+          d.buckle.setAttribute('x', f2(bk[0] - 0.9)); d.buckle.setAttribute('y', f2(bk[1] - 0.6));
         } else if (pr.type === 'bars') {
           const c = j[d.wk];
           const x = c[0], y = c[1] + 1.2;
@@ -419,7 +459,7 @@
     const f = build(svg, ex, { cues: true });
     const T = cycleLen(ex) * frac;
     const s = state(ex, T);
-    f.update(s.j, { seg: s.seg, next: poseAt(ex, T + 0.04) });
+    f.update(s.j, { seg: s.seg, T: T, next: poseAt(ex, T + 0.04) });
     return svg;
   }
 
@@ -432,7 +472,7 @@
       if (a.paused) return;
       const T = (ts - a.t0) / 1000;
       const s = state(a.ex, T);
-      a.update(s.j, { seg: s.seg, next: poseAt(a.ex, T + 0.04) });
+      a.update(s.j, { seg: s.seg, T: T, next: poseAt(a.ex, T + 0.04) });
     });
     if (live.size) requestAnimationFrame(loop); else running = false;
   }
@@ -440,7 +480,7 @@
     const f = build(svg, ex, { cues: true });
     const a = { svg, ex, update: f.update, t0: performance.now(), paused: false };
     const s = state(ex, 0);
-    a.update(s.j, { seg: s.seg, next: poseAt(ex, 0.04) });
+    a.update(s.j, { seg: s.seg, T: 0, next: poseAt(ex, 0.04) });
     live.add(a);
     if (!running) { running = true; requestAnimationFrame(loop); }
     return { stop() { live.delete(a); }, pause(v) { a.paused = v; } };

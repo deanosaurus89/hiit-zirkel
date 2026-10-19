@@ -1,5 +1,5 @@
 /* Service Worker: App-Shell offline verfügbar */
-const CACHE = 'hiit-zirkel-v3';
+const CACHE = 'hiit-zirkel-v4';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'figure.js', 'exercises.js', 'guide.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png'];
 self.addEventListener('install', (e) => {

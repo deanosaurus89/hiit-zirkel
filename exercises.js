@@ -350,6 +350,67 @@
                STAND({ h: [51, 61], l1: [52, 92], l2: [50, 92] })] }
   ];
 
+  // ───────────── Balance Board (rundes Wackelbrett Ø 40 cm, Halbkugel) & Turnringe ─────────────
+  const BT = 87.5; // Oberkante Board
+  const B = (x, o) => [{ type: 'board', x, ...(o || {}) }];
+  const R = (ax, o) => [{ type: 'rings', ax, ...(o || {}) }];
+  EX.push(
+    { id: 'board-kniebeuge', name: 'Kniebeuge auf dem Board', en: 'Wobble Board Squat', cat: 'lower', eq: 'board', level: 2, speed: 0.95, props: B(50, { wob: 3 }),
+      frames: [STAND({ h: [50, 56.5], a1: { u: 8, f: 10 }, a2: { u: 4, f: 6 }, l1: [51, BT], l2: [49, BT] }),
+               { h: [40, 73], t: 36, a1: { u: 88, f: 90 }, a2: { u: 84, f: 86 }, l1: [51, BT], l2: [49, BT] }] },
+    { id: 'board-einbeinstand', name: 'Einbeinstand auf dem Board', en: 'Single-Leg Balance', cat: 'lower', eq: 'board', level: 2, sides: true, speed: 1.4, hold: 0.3, props: B(50, { wob: 4 }), noGhost: true,
+      frames: [STAND({ h: [50, 56.5], t: 2, a1: { u: 40, f: 45 }, a2: { u: 30, f: 35 }, l1: [51, BT], l2: { u: 80, f: 5 } }),
+               STAND({ h: [50.5, 57], t: 4, a1: { u: 55, f: 60 }, a2: { u: 20, f: 25 }, l1: [51, BT], l2: { u: 72, f: 0 } })] },
+    { id: 'board-kippen', name: 'Wackel-Kreise', en: 'Wobble Board Tilts', cat: 'core', eq: 'board', level: 1, view: 'front', speed: 0.7, hold: 0.05, props: B(50, { tilt: 'feet' }),
+      frames: [{ h: [51.2, 56.8], t: 2, a1: { u: 40, f: 45 }, a2: { u: -40, f: -45 }, l1: [55, 86.2], l2: [45, 88.8] },
+               { h: [50, 57], t: 0, a1: { u: 42, f: 47 }, a2: { u: -42, f: -47 }, l1: [55, BT], l2: [45, BT] },
+               { h: [48.8, 56.8], t: -2, a1: { u: 40, f: 45 }, a2: { u: -40, f: -45 }, l1: [55, 88.8], l2: [45, 86.2] },
+               { h: [50, 57], t: 0, a1: { u: 42, f: 47 }, a2: { u: -42, f: -47 }, l1: [55, BT], l2: [45, BT] }] },
+    { id: 'board-liegestuetz', name: 'Liegestütz auf dem Board', en: 'Wobble Board Push-up', cat: 'upper', eq: 'board', level: 2, speed: 0.85, thumb: 0, props: B(62, { wob: 2 }),
+      frames: [{ h: [37, 77], t: 62, a1: [62, BT], a2: [61, BT], l1: [12, 92], l2: [13, 92] },
+               { h: [39.5, 83], t: 76, a1: [62, BT], a2: [61, BT], l1: [12, 92], l2: [13, 92] }] },
+    { id: 'board-plank', name: 'Unterarmstütz auf dem Board', en: 'Wobble Board Plank', cat: 'core', eq: 'board', level: 2, speed: 1.6, hold: 0.4, props: B(70, { wob: 2 }), noGhost: true,
+      frames: [{ h: [42, 81], t: 72, a1: { u: 0, f: 90 }, a2: { u: -2, f: 88 }, l1: [14, 92], l2: [15, 92] },
+               { h: [42, 80.4], t: 71.5, a1: { u: 1, f: 90 }, a2: { u: -1, f: 88 }, l1: [14, 92], l2: [15, 92] }] },
+    { id: 'board-bergsteiger', name: 'Bergsteiger auf dem Board', en: 'Wobble Board Mountain Climber', cat: 'cardio', eq: 'board', level: 3, speed: 0.2, hold: 0.02, props: B(62, { wob: 2.5 }),
+      frames: [{ h: [37, 77], t: 62, a1: [62, BT], a2: [61, BT], l1: { u: 58, f: -72 }, l2: [12, 92] },
+               { h: [37, 72.5], t: 66, a1: [62, BT], a2: [61, BT], l1: { u: 18, f: -80 }, l2: { u: -22, f: -86 } },
+               { h: [37, 77], t: 62, a1: [62, BT], a2: [61, BT], l2: { u: 58, f: -72 }, l1: [12, 92] },
+               { h: [37, 72.5], t: 66, a1: [62, BT], a2: [61, BT], l2: { u: 18, f: -80 }, l1: { u: -22, f: -86 } }] },
+    { id: 'board-ausfallschritt', name: 'Ausfallschritt aufs Board', en: 'Split Squat, Front Foot on Board', cat: 'lower', eq: 'board', level: 2, sides: true, speed: 0.85, props: B(62, { wob: 2.5 }),
+      frames: [STAND({ h: [49, 64], l1: [62, BT], l2: [36, 92], kb2: -1 }), STAND({ h: [48, 74], l1: [62, BT], l2: [36, 92] })] },
+    { id: 'board-beckenheben', name: 'Beckenheben, Füße auf dem Board', en: 'Glute Bridge on Wobble Board', cat: 'lower', eq: 'board', level: 2, speed: 0.9, thumb: 1, props: B(69, { wob: 2 }),
+      frames: [M(SUP, { l1: [69, BT], l2: [68, BT] }), { h: [52, 70], t: -130, n: 30, a1: { u: 85, f: 90 }, a2: { u: 83, f: 88 }, l1: [69, BT], l2: [68, BT] }] },
+
+    { id: 'ring-rudern', name: 'Ring-Rudern', en: 'Ring Row', cat: 'upper', eq: 'rings', level: 2, speed: 0.85, props: R(28),
+      frames: [{ h: [22.2, 66.6], t: -35, n: 5, a1: [27.5, 33.5], a2: [27, 34], l1: [40, 92], l2: [39, 92] },
+               { h: [25.5, 64.6], t: -28, n: 5, a1: [26, 40], a2: [25.5, 40.5], l1: [40, 92], l2: [39, 92], eb1: -1, eb2: -1 }] },
+    { id: 'ring-liegestuetz', name: 'Ring-Liegestütz', en: 'Ring Push-up', cat: 'upper', eq: 'rings', level: 2, speed: 0.9, thumb: 0, props: R(57),
+      frames: [{ h: [38, 71.2], t: 48, a1: [57, 79], a2: [56, 79], l1: [15, 92], l2: [16, 92] },
+               { h: [41, 77.5], t: 62, a1: [57, 79], a2: [56, 79], l1: [15, 92], l2: [16, 92] }] },
+    { id: 'ring-dips', name: 'Ring-Dips mit Fußstütze', en: 'Assisted Ring Dips', cat: 'upper', eq: 'rings', level: 2, speed: 0.9, props: R(49),
+      frames: [{ h: [47, 64], t: 0, a1: [49, 62.5], a2: [48, 62.5], l1: [62, 92], l2: [61, 92] },
+               { h: [45, 73], t: 10, a1: [49, 62.5], a2: [48, 62.5], l1: [62, 92], l2: [61, 92] }] },
+    { id: 'ring-fallout', name: 'Ring-Fallout kniend', en: 'Kneeling Ring Fallout', cat: 'core', eq: 'rings', level: 3, speed: 1.1, hold: 0.2, props: R(64),
+      frames: [{ h: [40, 76], t: 0, a1: { u: 45, f: 45 }, a2: { u: 43, f: 43 }, l1: { u: 0, f: -88 }, l2: { u: 0, f: -88 } },
+               { h: [52.3, 81.7], t: 40, a1: { u: 115, f: 115 }, a2: { u: 113, f: 113 }, l1: { u: -40, f: -88 }, l2: { u: -40, f: -88 } }] },
+    { id: 'ring-kniebeuge', name: 'Ring-Kniebeuge', en: 'Ring-Assisted Squat', cat: 'lower', eq: 'rings', level: 1, speed: 0.9, props: R(74),
+      frames: [STAND({ a1: [70, 46], a2: [69, 46.5], l1: [51, 92], l2: [49, 92] }),
+               { h: [40, 78], t: 24, a1: [70, 46], a2: [69, 46.5], l1: [51, 92], l2: [49, 92] }] },
+    { id: 'ring-sprungkniebeuge', name: 'Ring-Sprungkniebeuge', en: 'Ring-Assisted Jump Squat', cat: 'cardio', eq: 'rings', level: 2, speed: 0.45, hold: 0.08, thumb: 0, props: R(74),
+      frames: [{ h: [40, 78], t: 24, a1: [70, 46], a2: [69, 46.5], l1: [51, 92], l2: [49, 92] },
+               { h: [50.5, 55.5], t: 2, a1: [70, 44], a2: [69, 44.5], l1: [51.5, 86], l2: [49.5, 86] }] },
+    { id: 'ring-bizeps', name: 'Ring-Bizepscurl', en: 'Ring Biceps Curl', cat: 'upper', eq: 'rings', level: 2, speed: 0.85, props: R(30),
+      frames: [{ h: [24, 67.5], t: -30, n: 5, a1: [29.5, 37], a2: [29, 37.5], l1: [40, 92], l2: [39, 92] },
+               { h: [28.5, 65.5], t: -18, n: 0, a1: [26, 31], a2: [25.5, 31.5], l1: [40, 92], l2: [39, 92], eb1: -1, eb2: -1 }] },
+    { id: 'ring-y-heben', name: 'Ring-Y-Heben', en: 'Ring Y-Raise', cat: 'upper', eq: 'rings', level: 2, speed: 0.95, props: R(35),
+      frames: [{ h: [32, 64.5], t: -18, n: 0, a1: { u: 105, f: 105 }, a2: { u: 103, f: 103 }, l1: [42, 92], l2: [41, 92] },
+               { h: [37.5, 62], t: -5, n: -5, a1: { u: 168, f: 168 }, a2: { u: 166, f: 166 }, l1: [42, 92], l2: [41, 92] }] },
+    { id: 'ring-knieheben', name: 'Knieheben im Hang', en: 'Hanging Knee Raise', cat: 'core', eq: 'rings', level: 3, speed: 0.9, hold: 0.15, props: R(50),
+      frames: [{ h: [50, 50], t: 0, a1: { u: 180, f: 180 }, a2: { u: 178, f: 178 }, l1: { u: 3, f: 3 }, l2: { u: 1, f: 1 } },
+               { h: [51, 51], t: -10, a1: { u: 176, f: 176 }, a2: { u: 174, f: 174 }, l1: { u: 100, f: 5 }, l2: { u: 98, f: 3 } }] }
+  );
+
   const CATS = {
     cardio: { label: 'Ganzkörper', short: 'Cardio', color: '#ff5d73' },
     lower: { label: 'Beine & Po', short: 'Beine', color: '#ffb340' },
@@ -361,7 +422,9 @@
     chair: { label: 'Stuhl / Wand', short: 'Stuhl', icon: 'chair' },
     bars: { label: 'Liegestützgriffe', short: 'Griffe', icon: 'bars' },
     wheel: { label: 'Bauchroller', short: 'Roller', icon: 'wheel' },
-    band: { label: 'Widerstandsband', short: 'Band', icon: 'band' }
+    band: { label: 'Widerstandsband', short: 'Band', icon: 'band' },
+    board: { label: 'Balance Board', short: 'Board', icon: 'board' },
+    rings: { label: 'Turnringe', short: 'Ringe', icon: 'rings' }
   };
   window.EXERCISES = EX;
   window.EX_BY_ID = Object.fromEntries(EX.map((e) => [e.id, e]));
