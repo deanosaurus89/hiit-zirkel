@@ -3,7 +3,7 @@
   'use strict';
   const $ = (s, r = document) => r.querySelector(s);
   const EXS = window.EXERCISES, BY = window.EX_BY_ID, CATS = window.CATS, EQUIP = window.EQUIP;
-  const LS = { settings: 'hiit.settings.v1', plan: 'hiit.plan.v1', history: 'hiit.history.v1' };
+  const LS = { settings: 'hiit.settings.v1', plan: 'hiit.plan.v1', history: 'hiit.history.v1', planx: 'hiit.planx.v1', plans: 'hiit.plans.v1', active: 'hiit.activeplan.v1' };
   const PATTERN = ['cardio', 'lower', 'upper', 'core']; // Wechsel der Muskelgruppen wie im 7-Minuten-Workout
   const DEFAULTS = { count: 12, rounds: 2, work: 30, rest: 10, roundRest: 60, prep: 10,
     equipment: { chair: true, bars: false, wheel: false, band: false, board: false, rings: false }, sound: true, voice: true };
@@ -13,10 +13,19 @@
 
   const S = Object.assign({}, DEFAULTS, load(LS.settings, {}));
   S.equipment = Object.assign({}, DEFAULTS.equipment, S.equipment || {});
-  let plan = load(LS.plan, []).filter((id) => BY[id]);
+  let plan = load(LS.plan, []);
+  // pX[i]: optionale Einstellungen je Übung – null | { dur: Sek. } | { reps: Anzahl }
+  let pX = load(LS.planx, []);
+  pX = plan.map((id, i) => pX[i] || null).filter((x, i) => BY[plan[i]]);
+  plan = plan.filter((id) => BY[id]);
+  let plans = load(LS.plans, []).filter((q) => q && Array.isArray(q.items));
+  let activeId = load(LS.active, null);
+  let editMode = false;
+  const setPlan = (ids, xs) => { plan = ids; pX = xs || ids.map(() => null); };
 
   const fmt = (sec) => { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); };
-  const persist = () => { save(LS.settings, S); save(LS.plan, plan); };
+  const persist = () => { save(LS.settings, S); save(LS.plan, plan); save(LS.planx, pX); save(LS.active, activeId); };
+  const persistPlans = () => save(LS.plans, plans);
 
   // ───────────── Übungsauswahl ─────────────
   const available = () => EXS.filter((e) => e.eq === 'none' || S.equipment[e.eq]);
@@ -53,10 +62,11 @@
   }
   function fitPlan() {
     const pool = available().map((e) => e.id);
-    plan = plan.filter((id) => pool.includes(id));
-    if (plan.length > S.count) plan = plan.slice(0, S.count);
+    const keep = plan.map((id, i) => i).filter((i) => pool.includes(plan[i]));
+    setPlan(keep.map((i) => plan[i]), keep.map((i) => pX[i] || null));
+    if (plan.length > S.count) setPlan(plan.slice(0, S.count), pX.slice(0, S.count));
     const used = new Set(plan);
-    while (plan.length < S.count) { const e = pickFor(plan.length, used, available()); used.add(e.id); plan.push(e.id); }
+    while (plan.length < S.count) { const e = pickFor(plan.length, used, available()); used.add(e.id); plan.push(e.id); pX.push(null); }
   }
   function alternativesFor(id) {
     const cur = BY[id];
@@ -64,7 +74,8 @@
       (b.cat === cur.cat) - (a.cat === cur.cat) || (plan.includes(a.id) - plan.includes(b.id)) || a.name.localeCompare(b.name, 'de'));
   }
 
-  const totalSeconds = () => S.prep + S.rounds * (S.count * S.work + Math.max(0, S.count - 1) * S.rest) + Math.max(0, S.rounds - 1) * S.roundRest;
+  const itemDur = (i) => (pX[i] && pX[i].dur) || S.work; // Wiederholungen: Schätzung = Standard-Arbeitszeit
+  const totalSeconds = () => { const n = plan.length; let w = 0; for (let i = 0; i < n; i++) w += itemDur(i); return S.prep + S.rounds * (w + Math.max(0, n - 1) * S.rest) + Math.max(0, S.rounds - 1) * S.roundRest; };
 
   // ───────────── Kleine UI-Helfer ─────────────
   const ICONS = {
@@ -135,18 +146,19 @@
     { key: 'rest', label: 'Pause', hint: 'zwischen Übungen', min: 0, max: 60, step: 5, unit: 's' },
     { key: 'roundRest', label: 'Rundenpause', hint: 'zwischen Runden', min: 0, max: 180, step: 15, unit: 's' }
   ];
-  function stepperRow(def, container) {
+  function stepperRow(def, container, tgt) {
+    const T = tgt || S;
     const row = document.createElement('div');
     row.className = 'row';
     row.innerHTML = `<div class="row-label">${def.label}<small>${def.hint}</small></div>
       <div class="stepper"><button aria-label="${def.label} verringern">−</button><div class="val" aria-live="polite"></div><button aria-label="${def.label} erhöhen">+</button></div>`;
     const [minus, plus] = row.querySelectorAll('button');
     const val = row.querySelector('.val');
-    const show = () => { val.innerHTML = S[def.key] + (def.unit ? `<i>${def.unit}</i>` : ''); minus.disabled = S[def.key] <= def.min; plus.disabled = S[def.key] >= def.max; };
+    const show = () => { val.innerHTML = T[def.key] + (def.unit ? `<i>${def.unit}</i>` : ''); minus.disabled = T[def.key] <= def.min; plus.disabled = T[def.key] >= def.max; };
     const change = (d) => {
-      const v = Math.min(def.max, Math.max(def.min, S[def.key] + d * def.step));
-      if (v === S[def.key]) return false;
-      S[def.key] = v; show(); haptic(); onSettingsChanged(def.key); return true;
+      const v = Math.min(def.max, Math.max(def.min, T[def.key] + d * def.step));
+      if (v === T[def.key]) return false;
+      T[def.key] = v; show(); haptic(); if (!tgt) onSettingsChanged(def.key); return true;
     };
     [[minus, -1], [plus, 1]].forEach(([b, d]) => {
       let t1, t2;
@@ -195,7 +207,7 @@
       b.addEventListener('click', () => {
         if (k === 'none') { toast('Körpergewicht-Übungen sind immer dabei'); return; }
         S.equipment[k] = !S.equipment[k]; haptic();
-        plan = generatePlan(S.count); persist(); renderEquip(); renderPlan();
+        setPlan(generatePlan(S.count)); persist(); renderEquip(); renderPlan();
         toast(S.equipment[k] ? `${EQUIP[k].label} hinzugefügt – Übungen neu gemischt` : `${EQUIP[k].label} entfernt`);
       });
       g.appendChild(b);
@@ -206,16 +218,170 @@
     const li = document.createElement('li');
     li.className = 'item';
     li.style.animationDelay = Math.min(i, 12) * 25 + 'ms';
-    li.innerHTML = `${opts.num !== false ? `<span class="num">${i + 1}</span>` : ''}<button class="main-btn"><span class="thumb"></span><span class="meta"><div class="nm">${e.name}</div><div class="tags">${tagsHTML(e, { level: !!opts.level, sides: false })}</div></span></button>${opts.swap ? `<button class="swap" aria-label="${e.name} zufällig austauschen">${SWAP}</button>` : ''}`;
+    li.innerHTML = `${opts.num !== false ? `<span class="num">${i + 1}</span>` : ''}<button class="main-btn"><span class="thumb"></span><span class="meta"><div class="nm">${e.name}</div><div class="tags">${opts.x ? `<span class="tag xbadge">${opts.x.reps ? opts.x.reps + '× Wdh.' : opts.x.dur + ' s'}</span>` : ''}${tagsHTML(e, { level: !!opts.level, sides: false })}</div></span></button>${opts.edit ? `<span class="ed"><button class="ed-b" data-a="up" aria-label="Nach oben">▲</button><button class="ed-b" data-a="down" aria-label="Nach unten">▼</button><button class="ed-b" data-a="opt" aria-label="Dauer / Wiederholungen">⏱</button><button class="ed-b del" data-a="del" aria-label="Entfernen">✕</button></span>` : (opts.swap ? `<button class="swap" aria-label="${e.name} zufällig austauschen">${SWAP}</button>` : '')}`;
     li.querySelector('.thumb').appendChild(thumbSVG(e));
     li.querySelector('.main-btn').addEventListener('click', () => opts.onOpen ? opts.onOpen(id, i) : openDetail(id));
-    if (opts.swap) li.querySelector('.swap').addEventListener('click', () => quickSwap(i));
+    if (opts.swap && !opts.edit) li.querySelector('.swap').addEventListener('click', () => quickSwap(i));
+    if (opts.edit) li.querySelectorAll('.ed-b').forEach((b) => b.addEventListener('click', () => editAction(b.dataset.a, i)));
     return li;
   }
   function renderPlan() {
     const ol = $('#plan'); ol.innerHTML = '';
-    plan.forEach((id, i) => ol.appendChild(planItem(id, i, { swap: true, onOpen: (pid, idx) => openDetail(pid, idx) })));
+    ol.classList.toggle('editing', editMode);
+    plan.forEach((id, i) => ol.appendChild(planItem(id, i, { swap: true, edit: editMode, x: pX[i], onOpen: (pid, idx) => openDetail(pid, idx) })));
+    $('#btn-add-ex').classList.toggle('hidden', !editMode);
+    $('#btn-edit').textContent = editMode ? '✓ Fertig' : '✎ Bearbeiten';
+    $('#btn-shuffle').classList.toggle('hidden', editMode);
+    renderActive(); renderPlans();
+    if (stepRows.length) { stepRows.forEach((r) => r._show()); renderSummaryLine(); }
   }
+  // ───────────── Bearbeiten ─────────────
+  function syncCount() { S.count = plan.length; }
+  function editAction(a, i) {
+    haptic(8);
+    if (a === 'up' || a === 'down') {
+      const j = a === 'up' ? i - 1 : i + 1;
+      if (j < 0 || j >= plan.length) return;
+      [plan[i], plan[j]] = [plan[j], plan[i]]; [pX[i], pX[j]] = [pX[j], pX[i]];
+    } else if (a === 'del') {
+      if (plan.length <= 1) { toast('Mindestens eine Übung'); return; }
+      const nm = BY[plan[i]].name; plan.splice(i, 1); pX.splice(i, 1); syncCount(); toast(nm + ' entfernt');
+    } else if (a === 'opt') { openItemSheet(i); return; }
+    persist(); renderPlan();
+  }
+  function addExercise(id) {
+    if (plan.length >= 30) { toast('Maximal 30 Übungen'); return; }
+    plan.push(id); pX.push(null); syncCount(); persist(); renderPlan(); toast(BY[id].name + ' hinzugefügt');
+  }
+  let itIdx = 0, itMode = 'std', itVal = { dur: 30, reps: 12 };
+  function openItemSheet(i) {
+    itIdx = i; const x = pX[i];
+    itMode = x ? (x.reps ? 'reps' : 'dur') : 'std';
+    itVal = { dur: (x && x.dur) || S.work, reps: (x && x.reps) || 12 };
+    $('#it-name').textContent = `${i + 1}. ${BY[plan[i]].name}`;
+    renderItemSheet(); openSheet($('#sheet-item'));
+  }
+  function renderItemSheet() {
+    $('#it-mode').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === itMode));
+    const c = $('#it-stepper'); c.innerHTML = '';
+    if (itMode === 'std') { c.innerHTML = `<div class="row"><div class="row-label">Standard<small>${S.work} s wie unter „Training“ eingestellt</small></div></div>`; return; }
+    const d = itMode === 'dur' ? { key: 'dur', label: 'Dauer', hint: 'nur für diese Übung', min: 5, max: 180, step: 5, unit: 's' } : { key: 'reps', label: 'Wiederholungen', hint: 'ohne Countdown – du tippst „Fertig“', min: 1, max: 100, step: 1, unit: '×' };
+    stepperRow(d, c, itVal);
+  }
+  $('#it-mode').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (!b) return; itMode = b.dataset.m; haptic(6); renderItemSheet(); });
+  $('#it-apply').addEventListener('click', () => {
+    pX[itIdx] = itMode === 'std' ? null : itMode === 'dur' ? { dur: itVal.dur } : { reps: itVal.reps };
+    persist(); renderPlan(); closeSheet(); haptic(12);
+  });
+  // ───────────── Gespeicherte Pläne ─────────────
+  const uid = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const SET_KEYS = ['work', 'rest', 'rounds', 'roundRest', 'prep'];
+  function snapshot() {
+    const set = {}; SET_KEYS.forEach((k) => { set[k] = S[k]; }); set.equipment = Object.assign({}, S.equipment);
+    return { items: plan.map((ex, i) => Object.assign({ ex }, pX[i] || {})), settings: set };
+  }
+  function planTotal(q) {
+    const st = q.settings, n = q.items.length; let w = 0;
+    q.items.forEach((it) => { w += it.dur || st.work; });
+    return (st.prep || 0) + st.rounds * (w + Math.max(0, n - 1) * st.rest) + Math.max(0, st.rounds - 1) * st.roundRest;
+  }
+  const sameAsActive = () => { const q = plans.find((x) => x.id === activeId); if (!q) return false; const a = snapshot(); return JSON.stringify(a.items) === JSON.stringify(q.items) && JSON.stringify(a.settings) === JSON.stringify(q.settings); };
+  function savePlanAs() {
+    const name = (prompt('Name des Plans:', `Mein Plan ${plans.length + 1}`) || '').trim();
+    if (!name) return;
+    const q = Object.assign({ id: uid(), name, updated: Date.now() }, snapshot());
+    plans.push(q); activeId = q.id; persistPlans(); persist(); renderPlan(); haptic(12); toast(`„${name}“ gespeichert`);
+  }
+  function updateActive() {
+    const q = plans.find((x) => x.id === activeId); if (!q) return;
+    Object.assign(q, snapshot(), { updated: Date.now() }); persistPlans(); renderPlan(); haptic(12); toast(`„${q.name}“ aktualisiert`);
+  }
+  function loadPlan(id, quiet) {
+    const q = plans.find((x) => x.id === id); if (!q) return false;
+    const items = q.items.filter((it) => BY[it.ex]);
+    if (!items.length) { toast('Plan enthält keine bekannten Übungen'); return false; }
+    const st = q.settings || {};
+    SET_KEYS.forEach((k) => { if (typeof st[k] === 'number') S[k] = st[k]; });
+    if (st.equipment) S.equipment = Object.assign({}, DEFAULTS.equipment, st.equipment);
+    setPlan(items.map((it) => it.ex), items.map((it) => it.reps ? { reps: it.reps } : it.dur ? { dur: it.dur } : null));
+    syncCount(); activeId = id; editMode = false;
+    persist(); renderSetup();
+    if (!quiet) { haptic(12); toast(`„${q.name}“ geladen`); }
+    return true;
+  }
+  function renderActive() {
+    const el = $('#active-plan'); const q = plans.find((x) => x.id === activeId);
+    if (!q) { el.classList.add('hidden'); return; }
+    const same = sameAsActive();
+    el.classList.remove('hidden');
+    el.innerHTML = `<span>Plan: <b></b>${same ? '' : ' <i>· geändert</i>'}</span>${same ? '' : '<button class="chip" data-a="upd">Änderungen speichern</button>'}<button class="chip ghost" data-a="x" aria-label="Plan lösen">✕</button>`;
+    el.querySelector('b').textContent = q.name;
+    el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.a === 'upd') updateActive(); else { activeId = null; persist(); renderPlan(); } }));
+  }
+  function renderPlans() {
+    const box = $('#plans'); box.innerHTML = '';
+    if (!plans.length) { box.innerHTML = '<p class="section-hint">Noch keine Pläne. Stell unten deine Übungen zusammen und tippe „Als Plan speichern“ – Reihenfolge und Zeiten bleiben genau so erhalten.</p>'; return; }
+    plans.forEach((q) => {
+      const n = q.items.length, st = q.settings, reps = q.items.some((it) => it.reps);
+      const c = document.createElement('div');
+      c.className = 'plan-card' + (q.id === activeId ? ' on' : '');
+      c.innerHTML = `<button class="pc-main"><div class="pc-name"></div><div class="pc-meta">${n} Übung${n > 1 ? 'en' : ''} · ${st.rounds} Runde${st.rounds > 1 ? 'n' : ''} · ${st.work}/${st.rest} s · ca. ${fmt(planTotal(q))} min${reps ? ' · mit Wdh.' : ''}</div></button>
+        <button class="pc-play" data-a="start" aria-label="Plan direkt starten">${PLAY}</button>
+        <div class="pc-acts"><button data-a="load">Laden</button><button data-a="ren">Umbenennen</button><button data-a="dup">Duplizieren</button><button data-a="del" class="del">Löschen</button></div>`;
+      c.querySelector('.pc-name').textContent = q.name;
+      c.querySelector('.pc-main').addEventListener('click', () => loadPlan(q.id));
+      c.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => planAction(b.dataset.a, q)));
+      box.appendChild(c);
+    });
+  }
+  function planAction(a, q) {
+    if (a === 'load') loadPlan(q.id);
+    else if (a === 'start') { unlockAudio(); if (loadPlan(q.id, true)) startWorkout(); }
+    else if (a === 'ren') { const n = (prompt('Neuer Name:', q.name) || '').trim(); if (n) { q.name = n; persistPlans(); renderPlans(); renderActive(); } }
+    else if (a === 'dup') { const c = JSON.parse(JSON.stringify(q)); c.id = uid(); c.name = q.name + ' (Kopie)'; c.updated = Date.now(); plans.splice(plans.indexOf(q) + 1, 0, c); persistPlans(); renderPlans(); toast('Dupliziert'); }
+    else if (a === 'del') { if (confirm(`Plan „${q.name}“ wirklich löschen?`)) { plans = plans.filter((x) => x !== q); if (activeId === q.id) activeId = null; persistPlans(); persist(); renderPlan(); toast('Plan gelöscht'); } }
+  }
+  function exportText() { return JSON.stringify({ app: 'hiit-zirkel', version: 1, exported: new Date().toISOString(), plans }, null, 2); }
+  function openIO(mode) {
+    $('#io-title').textContent = mode === 'export' ? 'Pläne exportieren' : 'Pläne importieren';
+    $('#io-hint').textContent = mode === 'export' ? 'Die Datei wurde heruntergeladen (falls möglich). Alternativ den Text kopieren und z. B. in Notizen sichern.' : 'JSON aus einem Export hier einfügen oder eine Datei wählen. Vorhandene Pläne bleiben erhalten.';
+    $('#io-text').value = mode === 'export' ? exportText() : '';
+    $('#io-text').readOnly = mode === 'export';
+    $('#io-go').classList.toggle('hidden', mode === 'export'); $('#io-file-btn').classList.toggle('hidden', mode === 'export');
+    $('#io-copy').classList.toggle('hidden', mode !== 'export');
+    openSheet($('#sheet-io'));
+  }
+  function doExport() {
+    if (!plans.length) { toast('Noch keine Pläne gespeichert'); return; }
+    try {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([exportText()], { type: 'application/json' }));
+      a.download = `hiit-plaene-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    } catch (e) { /* nur Text */ }
+    openIO('export');
+  }
+  function doImport(text) {
+    let data; try { data = JSON.parse(text); } catch (e) { toast('Kein gültiges JSON'); return 0; }
+    const list = Array.isArray(data) ? data : (data && data.plans) || (data && data.items ? [data] : []);
+    let n = 0;
+    list.forEach((q) => {
+      if (!q || !Array.isArray(q.items)) return;
+      const items = q.items.map((it) => (typeof it === 'string' ? { ex: it } : it)).filter((it) => it && BY[it.ex]).map((it) => {
+        const o = { ex: it.ex }; if (+it.reps > 0) o.reps = Math.min(100, Math.round(+it.reps)); else if (+it.dur > 0) o.dur = Math.min(600, Math.round(+it.dur)); return o; });
+      if (!items.length) return;
+      const st = Object.assign({ work: 30, rest: 10, rounds: 1, roundRest: 60, prep: 10 }, q.settings || {});
+      SET_KEYS.forEach((k) => { st[k] = Math.max(0, Math.round(+st[k] || 0)); }); st.rounds = Math.max(1, st.rounds); st.work = Math.max(5, st.work);
+      st.equipment = Object.assign({}, DEFAULTS.equipment, st.equipment || {});
+      let name = String(q.name || 'Importierter Plan').slice(0, 60);
+      if (plans.some((x) => x.name === name)) name += ' (Import)';
+      plans.push({ id: uid(), name, updated: Date.now(), items, settings: st }); n++;
+    });
+    if (!n) { toast('Keine Pläne gefunden'); return 0; }
+    persistPlans(); renderPlans(); closeSheet(); toast(n > 1 ? `${n} Pläne importiert` : '1 Plan importiert');
+    return n;
+  }
+
   function quickSwap(i) {
     const cur = BY[plan[i]];
     const cands = available().filter((e) => e.cat === cur.cat && !plan.includes(e.id));
@@ -248,7 +414,7 @@
     const p = PRESETS[k]; const countChanged = p.count !== S.count;
     Object.assign(S, p);
     stepRows.forEach((r) => r._show());
-    if (k === 'classic') plan = classicPlan(); else if (countChanged) fitPlan();
+    if (k === 'classic') setPlan(classicPlan()); else if (countChanged) fitPlan();
     persist(); renderPlan(); renderSummaryLine(); haptic();
     toast(k === 'classic' ? 'Original 7-Minuten-Workout (ACSM)' : 'Vorlage übernommen');
   }
@@ -300,6 +466,7 @@
     openSheet(sheet);
   }
   let libFilter = 'all';
+  let libPick = false;
   function openLibrary() { renderLibrary(); openSheet($('#sheet-library')); }
   function renderLibrary() {
     const f = $('#lib-filters'); f.innerHTML = '';
@@ -310,9 +477,9 @@
       f.appendChild(b);
     });
     const list = EXS.filter((e) => libFilter === 'all' || e.eq === libFilter);
-    $('#lib-count').textContent = `${list.length} von ${EXS.length} Übungen · mit Animation & Anleitung`;
+    $('#lib-count').textContent = libPick ? `Tippe auf eine Übung, um sie ans Ende deines Plans zu setzen · ${list.length} Übungen` : `${list.length} von ${EXS.length} Übungen · mit Animation & Anleitung`;
     const ol = $('#lib-list'); ol.innerHTML = '';
-    list.forEach((e, i) => ol.appendChild(planItem(e.id, i, { num: false, level: true })));
+    list.forEach((e, i) => ol.appendChild(planItem(e.id, i, { num: false, level: true, onOpen: libPick ? (id) => { addExercise(id); haptic(12); } : null })));
   }
 
   // ───────────── Audio & Sprache ─────────────
@@ -360,69 +527,160 @@
   }
   const PCM = {};
   Object.keys(CUE_DEF).forEach((k) => { PCM[k] = synth(CUE_DEF[k]); });
-  const A = { ctx: null, bufs: {}, els: {}, unlocked: false, mode: (IS_IOS && !HAS_SESSION) ? 'html' : 'webaudio', log: [] };
-  function setSession() { try { if (HAS_SESSION) navigator.audioSession.type = 'playback'; } catch (e) { /* */ } }
-  function ensureEls() {
-    if (A.els.start) return;
-    Object.keys(PCM).forEach((k) => {
+  // Robuste Wiedergabe (v5):
+  //  • iOS: primär HTMLAudio-Pool (Medienwiedergabe → unabhängig vom Stumm-Schalter und von einem
+  //    unterbrochenen AudioContext). Jedes Element wird im Start-Tap per play()+pause() UNSTUMM entsperrt
+  //    (stummes play() zählt auf iOS nicht als Freigabe – Ursache des Fehlers in v3/v4).
+  //  • Sonst/als Fallback: ein langlebiger AudioContext mit Keep-alive-Quelle, Töne über die Context-Uhr.
+  //  • Bei jedem Tap, nach jeder Sprachansage und bei Rückkehr in die App wird erneut entsperrt/fortgesetzt.
+  const QS = new URLSearchParams(location.search);
+  const A = { ctx: null, bufs: {}, pool: {}, unlocked: false, keep: null, master: null,
+    mode: QS.get('audio') || (IS_IOS ? 'html' : 'webaudio'), log: [], dbg: QS.get('debug') === '1' || load('hiit.debug', false), sessionSet: false };
+  function alog(msg, extra) {
+    const e = Object.assign({ at: performance.now(), wall: new Date().toLocaleTimeString('de-DE'), msg, ctx: A.ctx ? A.ctx.state : '–' }, extra || {});
+    A.log.push(e); if (A.log.length > 400) A.log.shift();
+    if (A.dbg) renderDebug();
+    return e;
+  }
+  function setSession() {
+    if (A.sessionSet || !HAS_SESSION) return;
+    try { navigator.audioSession.type = 'playback'; A.sessionSet = true; alog('audioSession=playback'); } catch (e) { alog('audioSession Fehler: ' + e.message); }
+  }
+  const POOL_N = { start: 2, half: 2, tick: 3, end: 2, done: 1 };
+  function ensurePool() {
+    if (A.pool.start) return;
+    Object.keys(POOL_N).forEach((k) => {
       const url = wavURL(PCM[k]);
-      // je 2 Elemente pro Ton, damit schnelle Wiederholungen (Ticks) sich nicht abschneiden
-      A.els[k] = [0, 1].map(() => { const a = new Audio(url); a.preload = 'auto'; a.setAttribute('playsinline', ''); return a; });
-      A.els[k].i = 0;
+      A.pool[k] = Array.from({ length: POOL_N[k] }, () => { const a = new Audio(); a.src = url; a.preload = 'auto'; a.setAttribute('playsinline', ''); a._ok = false; return a; });
+      A.pool[k].i = 0;
     });
   }
-  // MUSS synchron aus einem Tap/Klick aufgerufen werden
+  function unlockPool() {
+    ensurePool();
+    Object.keys(A.pool).forEach((k) => A.pool[k].forEach((a) => {
+      if (a._ok || !(a.paused || a.ended)) return;
+      try {
+        a.muted = false;
+        const pr = a.play();
+        a.pause(); a.currentTime = 0; // sofort stoppen – unhörbar, aber Element ist durch die Geste freigegeben
+        a._ok = true;
+        if (pr && pr.catch) pr.catch((err) => { if (err.name === 'NotAllowedError') { a._ok = false; alog('Pool-Freigabe verweigert: ' + k); } });
+      } catch (e) { alog('Pool-Fehler ' + e.message); }
+    }));
+  }
+  function ensureCtx() {
+    if (A.ctx) return A.ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try {
+      A.ctx = new AC();
+      A.ctx.onstatechange = () => alog('AudioContext → ' + A.ctx.state);
+      A.master = A.ctx.createGain(); A.master.gain.value = 1; A.master.connect(A.ctx.destination);
+      Object.keys(PCM).forEach((k) => { const ab = A.ctx.createBuffer(1, PCM[k].length, SR); ab.getChannelData(0).set(PCM[k]); A.bufs[k] = ab; });
+      alog('AudioContext erstellt');
+    } catch (e) { alog('AudioContext Fehler ' + e.message); }
+    return A.ctx;
+  }
+  function startKeepAlive() {
+    const ctx = A.ctx; if (!ctx || A.keep) return;
+    try {
+      // fast lautloses Dauersignal, damit iOS den Kontext nicht wegen Stille schlafen legt
+      const len = ctx.sampleRate, b = ctx.createBuffer(1, len, ctx.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * 0.00003;
+      const src = ctx.createBufferSource(); src.buffer = b; src.loop = true; src.connect(ctx.destination); src.start();
+      A.keep = src; alog('Keep-alive gestartet');
+    } catch (e) { alog('Keep-alive Fehler ' + e.message); }
+  }
+  // MUSS synchron aus einem Tap/Klick aufgerufen werden (Start, Pause, Weiter, Überspringen, jeder Tap)
   function unlockAudio() {
     setSession();
-    try {
-      if (!A.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) A.ctx = new AC(); }
-      if (A.ctx) {
-        if (A.ctx.state !== 'running') A.ctx.resume().catch(() => {});
-        const b = A.ctx.createBuffer(1, 1, 22050), src = A.ctx.createBufferSource();
-        src.buffer = b; src.connect(A.ctx.destination); src.start(0);
-        if (!A.bufs.start) Object.keys(PCM).forEach((k) => { const ab = A.ctx.createBuffer(1, PCM[k].length, SR); ab.getChannelData(0).set(PCM[k]); A.bufs[k] = ab; });
-      }
-    } catch (e) { /* */ }
-    try {
-      ensureEls();
-      if (!A.unlocked) {
-        Object.keys(A.els).forEach((k) => A.els[k].forEach((a) => {
-          a.muted = true; const pr = a.play(); if (pr && pr.then) pr.then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => { a.muted = false; });
-          else { a.pause(); a.muted = false; }
-        }));
-      }
-    } catch (e) { /* */ }
+    const ctx = ensureCtx();
+    if (ctx) {
+      try {
+        if (ctx.state !== 'running') ctx.resume().then(() => alog('resume ok (Geste)')).catch((e) => alog('resume abgelehnt ' + e.name));
+        const src = ctx.createBufferSource(); src.buffer = ctx.createBuffer(1, 1, 22050); src.connect(ctx.destination); src.start(0);
+        startKeepAlive();
+      } catch (e) { alog('unlock ctx Fehler ' + e.message); }
+    }
+    unlockPool();
+    if (!A.unlocked) alog('Audio entsperrt (Modus ' + A.mode + ')');
     A.unlocked = true;
     unlockSpeech();
   }
-  function resumeAudio() {
-    setSession();
-    try { if (A.ctx && A.ctx.state !== 'running' && A.ctx.state !== 'closed') A.ctx.resume().catch(() => {}); } catch (e) { /* */ }
+  function resumeAudio(why) {
+    const ctx = A.ctx;
+    if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
+      try { ctx.resume().then(() => alog('resume ok (' + (why || 'auto') + ')')).catch((e) => alog('resume fehlgeschlagen ' + e.name)); } catch (e) { /* */ }
+    }
   }
-  function playHTML(name) {
-    ensureEls();
-    const pool = A.els[name]; if (!pool) return;
-    const a = pool[pool.i]; pool.i = (pool.i + 1) % pool.length;
-    try { a.pause(); a.currentTime = 0; a.volume = 1; const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) { /* */ }
+  function playPool(name) {
+    ensurePool();
+    const pool = A.pool[name]; if (!pool) return false;
+    let a = pool.find((x) => x.paused || x.ended);
+    if (!a) { a = pool[pool.i]; pool.i = (pool.i + 1) % pool.length; }
+    try {
+      a.currentTime = 0;
+      const pr = a.play();
+      if (pr && pr.catch) pr.catch((err) => { const e = alog('✗ HTMLAudio ' + name + ': ' + err.name); e.fail = true; playCtx(name, true); });
+      return true;
+    } catch (e) { alog('✗ HTMLAudio ' + name + ' ' + e.message); return false; }
+  }
+  function playCtx(name, isFallback) {
+    const ctx = A.ctx;
+    if (!ctx || !A.bufs[name]) return false;
+    if (ctx.state !== 'running') { resumeAudio('cue'); if (isFallback) alog('✗ auch WebAudio nicht bereit (' + ctx.state + ')'); return false; }
+    try {
+      const src = ctx.createBufferSource(); src.buffer = A.bufs[name]; src.connect(A.master); src.start(ctx.currentTime + 0.01);
+      if (isFallback) alog('↺ ' + name + ' über WebAudio nachgeholt');
+      return true;
+    } catch (e) { alog('✗ WebAudio ' + name + ' ' + e.message); return false; }
   }
   function cue(name, meta) {
-    A.log.push(Object.assign({ cue: name, at: performance.now() }, meta || {}));
-    if (A.log.length > 300) A.log.shift();
-    if (!S.sound) return;
-    resumeAudio();
-    const ctx = A.ctx;
-    if (A.mode === 'webaudio' && ctx && ctx.state === 'running' && A.bufs[name]) {
-      try { const src = ctx.createBufferSource(); src.buffer = A.bufs[name]; src.connect(ctx.destination); src.start(); return; } catch (e) { /* Fallback */ }
-    }
-    playHTML(name);
+    const entry = alog('cue ' + name, Object.assign({ cue: name }, meta || {}));
+    if (!S.sound) { entry.via = 'stumm'; return; }
+    if (!A.unlocked) entry.note = 'noch nicht entsperrt';
+    let ok = false;
+    if (A.mode === 'html') { ok = playPool(name); entry.via = ok ? 'html' : ''; if (!ok) { ok = playCtx(name, true); entry.via = ok ? 'webaudio' : 'FEHLER'; } }
+    else { ok = playCtx(name); entry.via = ok ? 'webaudio' : ''; if (!ok) { ok = playPool(name); entry.via = ok ? 'html' : 'FEHLER'; } }
+    if (!ok) entry.fail = true;
+    if (A.dbg) renderDebug();
   }
   const SND = {
     start: () => cue('start'), half: () => cue('half'), tick: () => cue('tick'), end: () => cue('end'), done: () => cue('done')
   };
-  ['visibilitychange', 'pageshow', 'focus'].forEach((ev) => window.addEventListener(ev, () => { if (!document.hidden) resumeAudio(); }));
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeAudio(); });
-  // Erster Tap irgendwo entsperrt ebenfalls
-  ['touchend', 'click'].forEach((ev) => document.addEventListener(ev, () => { if (!A.unlocked) unlockAudio(); else resumeAudio(); }, { capture: true, passive: true }));
+  ['pageshow', 'focus'].forEach((ev) => window.addEventListener(ev, () => resumeAudio(ev)));
+  document.addEventListener('visibilitychange', () => { alog('Sichtbarkeit: ' + document.visibilityState); if (!document.hidden) resumeAudio('visible'); });
+  // Jeder Tap entsperrt/weckt erneut (iOS erlaubt resume()/play() nur in Gesten zuverlässig)
+  ['touchend', 'click'].forEach((ev) => document.addEventListener(ev, () => unlockAudio(), { capture: true, passive: true }));
+
+  // ── Debug-Ansicht (?debug=1 oder Lautsprecher-Symbol lange drücken) ──
+  let dbgEl = null, dbgT = 0;
+  function renderDebug() {
+    if (!A.dbg) { if (dbgEl) dbgEl.classList.add('hidden'); return; }
+    const now = performance.now(); if (now - dbgT < 120) return; dbgT = now;
+    if (!dbgEl) {
+      dbgEl = document.createElement('div'); dbgEl.id = 'debug-log';
+      dbgEl.innerHTML = '<div class="dbg-head"><b>Audio-Debug</b><button data-a="test">Test</button><button data-a="copy">Kopieren</button><button data-a="clear">Leeren</button><button data-a="close">✕</button></div><div class="dbg-state"></div><pre></pre>';
+      dbgEl.addEventListener('click', (ev) => {
+        const act = ev.target.dataset && ev.target.dataset.a; if (!act) return;
+        if (act === 'close') setDebug(false);
+        if (act === 'clear') { A.log.length = 0; dbgT = 0; renderDebug(); }
+        if (act === 'test') testSound();
+        if (act === 'copy') { const t = debugText(); try { navigator.clipboard.writeText(t).then(() => toast('Log kopiert')); } catch (e) { prompt('Log kopieren:', t); } }
+      });
+      document.body.appendChild(dbgEl);
+    }
+    dbgEl.classList.remove('hidden');
+    const okPool = A.pool.start ? Object.values(A.pool).reduce((n, p) => n + p.filter((a) => a._ok).length, 0) : 0;
+    const totPool = Object.values(POOL_N).reduce((a, b) => a + b, 0);
+    dbgEl.querySelector('.dbg-state').textContent = `Modus ${A.mode} · Context ${A.ctx ? A.ctx.state : 'keiner'} · Keep-alive ${A.keep ? 'an' : 'aus'} · Pool ${okPool}/${totPool} frei · audioSession ${HAS_SESSION ? (navigator.audioSession.type || '?') : 'n/a'} · Ton ${S.sound ? 'an' : 'aus'} · Sprache ${S.voice ? 'an' : 'aus'} · iOS ${IS_IOS ? 'ja' : 'nein'}`;
+    dbgEl.querySelector('pre').textContent = A.log.slice(-40).reverse().map(fmtLog).join('\n');
+  }
+  const fmtLog = (l) => `${l.wall} ${l.fail ? '✗' : ' '} ${l.msg}${l.via ? ' → ' + l.via : ''}${l.phase ? ' [' + l.phase + (l.i != null ? '#' + l.i : '') + (l.t != null ? ' t=' + l.t : '') + ']' : ''} (ctx ${l.ctx})`;
+  const debugText = () => dbgEl.querySelector('.dbg-state').textContent + '\n' + navigator.userAgent + '\n' + A.log.map(fmtLog).join('\n');
+  function setDebug(v) { A.dbg = v; save('hiit.debug', v); dbgT = 0; renderDebug(); toast(v ? 'Audio-Debug an' : 'Audio-Debug aus'); }
+  setInterval(() => { if (A.dbg) renderDebug(); }, 1000);
+  if (A.dbg) setTimeout(renderDebug, 0);
 
   let deVoice = null, speechUnlocked = false;
   function pickVoice() {
@@ -442,6 +700,8 @@
       speechSynthesis.resume && speechSynthesis.resume();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'de-DE'; if (deVoice) u.voice = deVoice; u.rate = 1.04; u.pitch = 1; u.volume = 1;
+      u.onend = () => { alog('Sprache fertig: ' + text); resumeAudio('nach Sprache'); };
+      u.onerror = (ev) => { alog('Sprache Fehler: ' + (ev.error || '?')); resumeAudio('nach Sprache'); };
       // nach den Signaltönen sprechen, damit nichts verschluckt wird
       setTimeout(() => { try { speechSynthesis.speak(u); } catch (e) { /* */ } }, 450);
     } catch (e) { /* */ }
@@ -468,7 +728,8 @@
     if (S.prep > 0) ph.push({ type: 'prep', dur: S.prep, ex: plan[0], round: 0, idx: 0 });
     for (let r = 0; r < S.rounds; r++) {
       plan.forEach((id, i) => {
-        ph.push({ type: 'work', dur: S.work, ex: id, round: r, idx: i });
+        const x = pX[i] || {};
+        ph.push(x.reps ? { type: 'work', dur: S.work, reps: x.reps, ex: id, round: r, idx: i } : { type: 'work', dur: x.dur || S.work, ex: id, round: r, idx: i });
         const last = i === plan.length - 1;
         if (!last && S.rest > 0) ph.push({ type: 'rest', dur: S.rest, ex: plan[i + 1], round: r, idx: i + 1 });
         if (last && r < S.rounds - 1 && S.roundRest > 0) ph.push({ type: 'roundRest', dur: S.roundRest, ex: plan[0], round: r + 1, idx: 0 });
@@ -495,7 +756,7 @@
   }
   function enterPhase(i, startTs, silent) {
     P.i = i; const ph = P.phases[i];
-    P.dur = ph.dur; P.endAt = startTs + ph.dur * 1000; P.lastSec = Math.ceil(ph.dur); P.half = false; P.fired = {}; P.phStart = startTs;
+    P.dur = ph.dur; P.endAt = ph.reps ? Infinity : startTs + ph.dur * 1000; P.lastSec = Math.ceil(ph.dur); P.half = false; P.fired = {}; P.phStart = startTs;
     const e = BY[ph.ex];
     const scr = $('#screen-player');
     scr.dataset.phase = ph.type;
@@ -509,6 +770,8 @@
     $('#p-info').innerHTML = playerInfoHTML(e, ph.type !== 'work');
     $('#p-info').scrollTop = 0;
     $('#p-sides').classList.add('hidden');
+    $('#p-done').classList.toggle('hidden', !ph.reps);
+    scr.classList.toggle('reps', !!ph.reps);
     if (!P.anim || P.anim.ex !== e.id) { Figure.stopAll($('#screen-player')); P.anim = Figure.animate($('#p-figure'), e); P.anim.ex = e.id; }
     renderTime(ph.dur);
     resumeAudio();
@@ -517,7 +780,8 @@
     if (ph.type === 'work') {
       cue('start', meta);
       const prev = P.phases[i - 1];
-      speak(prev && prev.type !== 'work' ? 'Los!' : `${e.name}. Los!`);
+      if (ph.reps) speak(`${prev && prev.type !== 'work' ? '' : e.name + '. '}${ph.reps} Wiederholungen. Los!`);
+      else speak(prev && prev.type !== 'work' ? 'Los!' : `${e.name}. Los!`);
     } else if (ph.type === 'rest') {
       speak(`Pause. Als Nächstes: ${e.name}.`);
     } else if (ph.type === 'roundRest') {
@@ -527,6 +791,17 @@
     }
   }
   function renderTime(left) {
+    const cur = P.phases[P.i];
+    if (cur && cur.reps) {
+      const num = $('#p-time'); const txt = cur.reps + '×';
+      if (num.textContent !== txt) { num.textContent = txt; num.classList.remove('warn'); }
+      num.style.fontSize = cur.reps >= 100 ? '34px' : '';
+      $('#ring-fg').style.strokeDashoffset = '0';
+      let el0 = 0; for (let k = 0; k < P.i; k++) el0 += P.phases[k].dur;
+      el0 += Math.min(cur.dur, P.paused ? 0 : (performance.now() - P.phStart) / 1000);
+      $('#p-progress-bar').style.width = (100 * el0 / P.total).toFixed(2) + '%';
+      return;
+    }
     const sec = Math.max(0, Math.ceil(left - 0.001));
     const num = $('#p-time');
     const txt = sec >= 60 ? fmt(sec) : String(sec);
@@ -558,16 +833,17 @@
       left = (P.endAt - now) / 1000;
     }
     const ph = P.phases[P.i];
-    // Zeitbasierte Signale: jedes genau einmal, verpasste (älter als 0,9 s) werden nicht nachgeholt
+    if (ph.reps) { renderTime(Infinity); return; } // Wiederholungen: kein Countdown, „Fertig“ tippen
+    // Zeitbasierte Signale: jedes genau einmal, verpasste (älter als 1,5 s) werden nicht nachgeholt
     const el = ph.dur - left, meta = { phase: ph.type, i: P.i };
     if (ph.dur > 3) [3, 2, 1].forEach((thr) => {
       const k = 't' + thr;
-      if (!P.fired[k] && left <= thr) { P.fired[k] = true; if (left > thr - 0.9) cue('tick', Object.assign({ t: +el.toFixed(2), n: thr }, meta)); }
+      if (!P.fired[k] && left <= thr) { P.fired[k] = true; if (left > thr - 1.5) cue('tick', Object.assign({ t: +el.toFixed(2), n: thr }, meta)); }
     });
     const wantHalf = ph.type === 'work' ? ph.dur >= 8 : (ph.type !== 'prep' && ph.dur >= 30);
     if (wantHalf && !P.fired.half && left <= ph.dur / 2) {
       P.fired.half = true;
-      if (left > ph.dur / 2 - 0.9) {
+      if (left > ph.dur / 2 - 1.5) {
         cue('half', Object.assign({ t: +el.toFixed(2) }, meta));
         if (ph.type === 'work' && BY[ph.ex].sides) {
           speak('Seite wechseln!');
@@ -592,21 +868,33 @@
     const was = P.paused;
     to = Math.max(0, Math.min(P.phases.length - 1, to));
     enterPhase(to, performance.now());
-    if (was) { P.pauseLeft = P.dur; }
+    if (was) { P.pauseLeft = P.phases[to].reps ? Infinity : P.dur; }
   }
   function skip() {
     const ph = P.phases[P.i];
-    if (ph.type === 'work') { P.workSec += Math.max(0, ph.dur - (P.paused ? P.pauseLeft : (P.endAt - performance.now()) / 1000)); }
+    if (ph.reps) P.workSec += (performance.now() - P.phStart) / 1000;
+    else if (ph.type === 'work') { P.workSec += Math.max(0, ph.dur - (P.paused ? P.pauseLeft : (P.endAt - performance.now()) / 1000)); }
     if (P.i >= P.phases.length - 1) { finish(); return; }
     haptic(); jump(P.i + 1);
   }
   function back() {
     const ph = P.phases[P.i];
-    const elapsed = ph.dur - (P.paused ? P.pauseLeft : (P.endAt - performance.now()) / 1000);
+    const elapsed = ph.reps ? (performance.now() - P.phStart) / 1000 : ph.dur - (P.paused ? P.pauseLeft : (P.endAt - performance.now()) / 1000);
     haptic();
     if (ph.type === 'work' && elapsed > 3) { jump(P.i); return; }
     for (let k = P.i - 1; k >= 0; k--) if (P.phases[k].type === 'work') { jump(k); return; }
     jump(0);
+  }
+  function repsDone() {
+    const ph = P.phases[P.i];
+    if (!P.active || !ph || !ph.reps) return;
+    if (P.paused) setPaused(false);
+    haptic(15);
+    P.workSec += (performance.now() - P.phStart) / 1000; P.done.push(ph.ex);
+    const nxt = P.phases[P.i + 1];
+    if (!nxt || nxt.type !== 'work') cue('end', { phase: 'work', i: P.i, t: 'Fertig' });
+    if (!nxt) { finish(); return; }
+    enterPhase(P.i + 1, performance.now());
   }
   function stopPlayer() {
     P.active = false; clearInterval(P.timer); Figure.stopAll($('#screen-player')); P.anim = null; unlockScreen();
@@ -638,8 +926,18 @@
 
   // ───────────── Events ─────────────
   $('#btn-start').addEventListener('click', startWorkout);
-  $('#btn-shuffle').addEventListener('click', () => { plan = generatePlan(S.count); persist(); renderPlan(); haptic(12); toast('Neu gemischt'); });
-  $('#btn-library').addEventListener('click', openLibrary);
+  $('#btn-shuffle').addEventListener('click', () => { setPlan(generatePlan(S.count)); persist(); renderPlan(); haptic(12); toast('Neu gemischt'); });
+  $('#btn-library').addEventListener('click', () => { libPick = false; openLibrary(); });
+  $('#btn-add-ex').addEventListener('click', () => { libPick = true; openLibrary(); });
+  $('#btn-edit').addEventListener('click', () => { editMode = !editMode; haptic(8); renderPlan(); });
+  $('#btn-save-plan').addEventListener('click', savePlanAs);
+  $('#btn-export').addEventListener('click', doExport);
+  $('#btn-import').addEventListener('click', () => openIO('import'));
+  $('#io-go').addEventListener('click', () => doImport($('#io-text').value));
+  $('#io-copy').addEventListener('click', () => { const t = $('#io-text'); t.select(); try { (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(() => toast('Kopiert'), () => { document.execCommand('copy'); toast('Kopiert'); }); } catch (e) { /* */ } });
+  $('#io-file-btn').addEventListener('click', () => $('#io-file').click());
+  $('#io-file').addEventListener('change', (ev) => { const f = ev.target.files[0]; if (!f) return; f.text().then((t) => { $('#io-text').value = t; doImport(t); }); ev.target.value = ''; });
+  $('#p-done').addEventListener('click', (ev) => { ev.stopPropagation(); repsDone(); });
   document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
   $('#backdrop').addEventListener('click', () => { libReturn = false; closeSheet(); });
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
@@ -649,10 +947,14 @@
   }));
   $('#btn-pause').addEventListener('click', () => { haptic(); setPaused(!P.paused); });
   $('#btn-resume').addEventListener('click', () => setPaused(false));
-  $('#btn-next').addEventListener('click', skip);
+  $('#btn-next').addEventListener('click', () => { const ph = P.phases[P.i]; if (ph && ph.reps) repsDone(); else skip(); });
   $('#btn-prev').addEventListener('click', back);
   $('#p-info').addEventListener('click', () => { $('#screen-player').classList.toggle('info-open'); haptic(6); });
-  $('#btn-voice').addEventListener('click', () => { unlockAudio(); S.sound = !S.sound; persist(); renderVoiceBtn(); if (S.sound) cue('tick'); else try { speechSynthesis.cancel(); } catch (e) { /* */ } renderSetup(); });
+  let lpT = null, lpFired = false;
+  $('#btn-voice').addEventListener('pointerdown', () => { lpFired = false; clearTimeout(lpT); lpT = setTimeout(() => { lpFired = true; haptic(30); setDebug(!A.dbg); }, 700); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((n) => $('#btn-voice').addEventListener(n, () => clearTimeout(lpT)));
+  $('#btn-voice').addEventListener('contextmenu', (ev) => ev.preventDefault());
+  $('#btn-voice').addEventListener('click', () => { if (lpFired) { lpFired = false; return; } unlockAudio(); S.sound = !S.sound; persist(); renderVoiceBtn(); if (S.sound) cue('tick'); else try { speechSynthesis.cancel(); } catch (e) { /* */ } renderSetup(); });
   $('#btn-close').addEventListener('click', () => {
     const wasPaused = P.paused; setPaused(true);
     if (confirm('Training beenden?')) { stopPlayer(); show('screen-setup'); } else if (!wasPaused) setPaused(false);
@@ -667,7 +969,7 @@
   });
 
   // ───────────── Init ─────────────
-  if (plan.length !== S.count) { if (!plan.length) plan = generatePlan(S.count); else fitPlan(); }
+  if (plan.length !== S.count) { if (!plan.length) setPlan(generatePlan(S.count)); else fitPlan(); }
   persist();
   renderSetup();
   renderPauseBtn();
@@ -676,5 +978,5 @@
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
   // Test-/Debug-Zugriff
-  window.HIIT = { A, cue, testSound, S, get plan() { return plan; }, P, generatePlan, available, totalSeconds, buildPhases, openDetail };
+  window.HIIT = { get pX() { return pX; }, get plans() { return plans; }, doImport, exportText, repsDone, A, cue, testSound, S, get plan() { return plan; }, P, generatePlan, available, totalSeconds, buildPhases, openDetail };
 })();

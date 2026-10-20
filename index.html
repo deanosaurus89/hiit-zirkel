@@ -53,14 +53,27 @@
         <div class="equip-grid" id="equip"></div>
 
         <div class="section-row">
+          <h2 class="section-title">Meine Pläne</h2>
+          <button class="text-btn" id="btn-save-plan">＋ Als Plan speichern</button>
+        </div>
+        <div class="plans" id="plans"></div>
+        <div class="plans-io">
+          <button class="text-btn small" id="btn-export">⇩ Exportieren</button>
+          <button class="text-btn small" id="btn-import">⇧ Importieren</button>
+        </div>
+
+        <div class="section-row">
           <h2 class="section-title">Deine Übungen</h2>
+          <span class="row-btns"><button class="text-btn" id="btn-edit">✎ Bearbeiten</button>
           <button class="text-btn" id="btn-shuffle">
             <svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
             Neu mischen
-          </button>
+          </button></span>
         </div>
+        <div class="active-plan hidden" id="active-plan"></div>
         <p class="section-hint">Tippe auf eine Übung für Anleitung &amp; Alternativen. ⇄ tauscht sie zufällig aus.</p>
         <ol class="plan" id="plan"></ol>
+        <button class="add-ex hidden" id="btn-add-ex">＋ Übung aus der Bibliothek hinzufügen</button>
 
         <h2 class="section-title">Optionen</h2>
         <div class="card list-card" id="options"></div>
@@ -110,6 +123,7 @@
               <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"/>
             </svg>
             <div class="ring-num" id="p-time">30</div>
+            <button class="rep-done hidden" id="p-done">Fertig ✓</button>
           </div>
           <button class="p-info" id="p-info" aria-label="Anleitung vergrößern"></button>
         </div>
@@ -172,6 +186,27 @@
         <div class="filters" id="lib-filters"></div>
       </div>
       <div class="sheet-scroll"><ol class="plan compact" id="lib-list"></ol></div>
+    </div>
+    <div class="sheet" id="sheet-item" role="dialog" aria-modal="true" aria-labelledby="it-name">
+      <div class="grabber"></div>
+      <button class="icon-btn sheet-close" data-close aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="sheet-scroll">
+        <h2 class="it-title" id="it-name"></h2>
+        <p class="section-hint">Optional: eigene Dauer oder Wiederholungen statt Zeit. Bei Wiederholungen tippst du im Training auf „Fertig“.</p>
+        <div class="seg" id="it-mode"><button data-m="std">Standard</button><button data-m="dur">Eigene Zeit</button><button data-m="reps">Wiederholungen</button></div>
+        <div class="card list-card" id="it-stepper"></div>
+        <button class="btn-primary small" id="it-apply">Übernehmen</button>
+      </div>
+    </div>
+    <div class="sheet" id="sheet-io" role="dialog" aria-modal="true" aria-label="Pläne importieren / exportieren">
+      <div class="grabber"></div>
+      <button class="icon-btn sheet-close" data-close aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="sheet-scroll">
+        <h2 class="it-title" id="io-title">Pläne</h2>
+        <p class="section-hint" id="io-hint"></p>
+        <textarea id="io-text" spellcheck="false"></textarea>
+        <div class="io-btns"><button class="chip" id="io-copy">Kopieren</button><button class="chip" id="io-file-btn">Datei wählen…</button><input type="file" id="io-file" accept="application/json,.json,text/plain" hidden><button class="btn-primary small" id="io-go">Importieren</button></div>
+      </div>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </div>
